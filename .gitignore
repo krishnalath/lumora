@@ -44,7 +44,3 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Firebase sensitive config files - do NOT commit these
-android/app/google-services.json
-ios/Runner/GoogleService-Info.plist
-lib/firebase_options.dart
