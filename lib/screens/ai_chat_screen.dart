@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../services/auth_service.dart';
 
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key});
@@ -84,10 +85,42 @@ class _AiChatScreenState extends State<AiChatScreen> {
                       letterSpacing: 6.0,
                     ),
                   ),
-                  const CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Color(0xFFE2E8F0),
-                    child: Icon(Icons.person, color: Color(0xFF64748B)),
+                  PopupMenuButton<String>(
+                    color: const Color(0xFF1E212B),
+                    elevation: 8,
+                    onSelected: (value) async {
+                      if (value == 'signout') {
+                        await AuthService().signOut();
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        value: 'signout',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.logout, color: Color(0xFF00E5FF), size: 20),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Sign Out', 
+                              style: GoogleFonts.dmSans(
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: Colors.white.withOpacity(0.1)),
+                    ),
+                    offset: const Offset(0, 45),
+                    child: const CircleAvatar(
+                      radius: 20,
+                      backgroundColor: Color(0xFFE2E8F0),
+                      child: Icon(Icons.person, color: Color(0xFF64748B)),
+                    ),
                   ),
                 ],
               ),

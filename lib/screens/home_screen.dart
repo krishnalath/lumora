@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
+import '../services/auth_service.dart';
+import '../services/quote_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,6 +14,26 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedMoodIndex = 2; // Serene selected by default
+  String _quoteText = '"Peace is not the absence of trouble, but the presence of God."';
+  String _quoteAuthor = 'UNKNOWN';
+  bool _isQuoteLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadQuote();
+  }
+
+  Future<void> _loadQuote() async {
+    final quoteData = await QuoteService.fetchRandomQuote();
+    if (mounted) {
+      setState(() {
+        _quoteText = '"${quoteData['text']}"';
+        _quoteAuthor = quoteData['author']!.toUpperCase();
+        _isQuoteLoading = false;
+      });
+    }
+  }
 
   final List<Map<String, String>> _moods = [
     {'emoji': '😔', 'label': 'Low'},
@@ -56,10 +78,42 @@ class _HomeScreenState extends State<HomeScreen> {
                       letterSpacing: 6.0,
                     ),
                   ),
-                  const CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Color(0xFFE2E8F0),
-                    child: Icon(Icons.person, color: Color(0xFF64748B)),
+                  PopupMenuButton<String>(
+                    color: const Color(0xFF1E212B),
+                    elevation: 8,
+                    onSelected: (value) async {
+                      if (value == 'signout') {
+                        await AuthService().signOut();
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        value: 'signout',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.logout, color: Color(0xFF00E5FF), size: 20),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Sign Out', 
+                              style: GoogleFonts.dmSans(
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: Colors.white.withOpacity(0.1)),
+                    ),
+                    offset: const Offset(0, 45),
+                    child: const CircleAvatar(
+                      radius: 20,
+                      backgroundColor: Color(0xFFE2E8F0),
+                      child: Icon(Icons.person, color: Color(0xFF64748B)),
+                    ),
                   ),
                 ],
               ),
@@ -268,35 +322,42 @@ class _HomeScreenState extends State<HomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const SizedBox(height: 12),
-                        Text(
-                          '"Peace is not the absence of\ntrouble, but the presence of God."',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                            height: 1.5,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Container(
-                              width: 32,
-                              height: 1.5,
-                              color: Colors.white.withOpacity(0.3),
+                        _isQuoteLoading 
+                          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00E5FF)))
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _quoteText,
+                                  style: GoogleFonts.dmSans(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 32,
+                                      height: 1.5,
+                                      color: Colors.white.withOpacity(0.3),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _quoteAuthor,
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 1.5,
+                                        color: Colors.white.withOpacity(0.7),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'UNKNOWN',
-                              style: GoogleFonts.dmSans(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.5,
-                                color: Colors.white.withOpacity(0.7),
-                              ),
-                            ),
-                          ],
-                        ),
                       ],
                     ),
                   ],

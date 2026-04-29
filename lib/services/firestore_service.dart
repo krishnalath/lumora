@@ -60,4 +60,43 @@ class FirestoreService {
         .orderBy('createdAt', descending: false)
         .snapshots();
   }
+
+  // Journal Methods
+  Future<void> createJournalEntry({
+    required String title,
+    required String content,
+    required String tag,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Must be logged in to journal');
+
+    final now = DateTime.now();
+    await _db.collection('journals').add({
+      'uid': user.uid,
+      'title': title,
+      'content': content,
+      'tag': tag.toUpperCase(),
+      'date': '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Stream<QuerySnapshot> getJournalEntries() {
+    final user = _auth.currentUser;
+    if (user == null) return const Stream.empty();
+
+    return _db
+        .collection('journals')
+        .where('uid', isEqualTo: user.uid)
+        // .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Future<void> updateJournalEntry(String entryId, Map<String, dynamic> data) async {
+    await _db.collection('journals').doc(entryId).update(data);
+  }
+
+  Future<void> deleteJournalEntry(String entryId) async {
+    await _db.collection('journals').doc(entryId).delete();
+  }
 }
