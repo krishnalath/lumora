@@ -34,12 +34,7 @@ class _CreateJournalScreenState extends State<CreateJournalScreen> {
 
   void _saveEntry() async {
     if (_titleController.text.trim().isEmpty || _contentController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in both title and content'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppTheme.showCustomSnackBar(context, 'Please fill in both title and content', isError: true);
       return;
     }
 
@@ -57,9 +52,7 @@ class _CreateJournalScreenState extends State<CreateJournalScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        AppTheme.showCustomSnackBar(context, 'Error: $e', isError: true);
       }
     } finally {
       if (mounted) {

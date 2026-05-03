@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 class AppTheme {
   // Colors
   static const Color primary = Color(0xFF00E5FF);
+  static const Color accentGreen = Color(0xFF00C9A7);
+  static const Color accentLavender = Color(0xFF9B8CF0);
   static const Color primaryDark = Color(0xFF00B8CC);
   static const Color primaryLight = Color(0xFF80F2FF);
   static const Color background = Color(0xFFF6F5F2);
@@ -40,6 +42,35 @@ class AppTheme {
         bodyMedium: GoogleFonts.dmSans(fontSize: 14, color: textMedium),
       ),
       useMaterial3: true,
+    );
+  }
+
+  static void showCustomSnackBar(
+    BuildContext context,
+    String message, {
+    bool isError = false,
+    bool isSuccess = false,
+    SnackBarAction? action,
+  }) {
+    Color bgColor = const Color(0xFF252A36);
+    if (isError) bgColor = Colors.red.shade400;
+    if (isSuccess) bgColor = Colors.green;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: GoogleFonts.dmSans(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        backgroundColor: bgColor,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        action: action,
+      ),
     );
   }
 }

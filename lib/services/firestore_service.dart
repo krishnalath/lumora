@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -99,4 +100,56 @@ class FirestoreService {
   Future<void> deleteJournalEntry(String entryId) async {
     await _db.collection('journals').doc(entryId).delete();
   }
+
+  // Task Methods
+  Future<void> createTask({
+    required String title,
+    required String category,
+    required String status,
+    required DateTime date,
+    required TimeOfDay startTime,
+    required TimeOfDay endTime,
+    int progress = 0,
+    bool isPinned = false,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Must be logged in to manage tasks');
+
+    await _db.collection('tasks').add({
+      'uid': user.uid,
+      'title': title,
+      'category': category,
+      'status': status,
+      'date': Timestamp.fromDate(DateTime(date.year, date.month, date.day)), // store pure date for easier querying
+      'startTime': '${startTime.hour}:${startTime.minute}',
+      'endTime': '${endTime.hour}:${endTime.minute}',
+      'progress': progress,
+      'isPinned': isPinned,
+      'pinnedAt': isPinned ? FieldValue.serverTimestamp() : null,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Stream<QuerySnapshot> getTasksForDate(DateTime date) {
+    final user = _auth.currentUser;
+    if (user == null) return const Stream.empty();
+
+    // Reset date to midnight for exact match if we saved it as pure date
+    final targetDate = DateTime(date.year, date.month, date.day);
+    
+    return _db
+        .collection('tasks')
+        .where('uid', isEqualTo: user.uid)
+        .where('date', isEqualTo: Timestamp.fromDate(targetDate))
+        .snapshots();
+  }
+
+  Future<void> updateTask(String taskId, Map<String, dynamic> data) async {
+    await _db.collection('tasks').doc(taskId).update(data);
+  }
+
+  Future<void> deleteTask(String taskId) async {
+    await _db.collection('tasks').doc(taskId).delete();
+  }
 }
+

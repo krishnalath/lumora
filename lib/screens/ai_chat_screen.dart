@@ -1,10 +1,22 @@
+import 'package:google_generative_ai/google_generative_ai.dart';
+import '../native_bridge.dart'; // This connects to your C++ Brain
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
-import '../services/auth_service.dart';
+import '../services/conversation_service.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'dart:io';
+import 'package:flutter_animate/flutter_animate.dart';
 
 class AiChatScreen extends StatefulWidget {
-  const AiChatScreen({super.key});
+  const AiChatScreen({super.key, this.onLiveStatusChanged});
+
+  final ValueChanged<bool>? onLiveStatusChanged;
 
   @override
   State<AiChatScreen> createState() => _AiChatScreenState();
@@ -13,38 +25,168 @@ class AiChatScreen extends StatefulWidget {
 class _AiChatScreenState extends State<AiChatScreen> {
   final TextEditingController _msgController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  final List<Map<String, dynamic>> _messages = [
-    {
-      'isBot': true,
-      'text':
-          "Hi there. I'm Luna, your companion. How are you feeling in this moment? I'm here to listen without judgment.",
-      'time': '10:30 AM',
-    },
-    {
-      'isBot': false,
-      'text':
-          "I've been feeling a bit overwhelmed with my exams coming up. My mind won't stop racing.",
-      'time': '10:32 AM',
-    },
-    {
-      'isBot': true,
-      'text':
-          "That sounds heavy, but it's a very natural reaction to pressure. Let's try to ground you. Would you like to do a quick 2-minute breathing exercise, or should we talk through what's on your mind?",
-      'time': '10:33 AM',
-      'showBreathing': true,
-    },
+  final _model = GenerativeModel(
+    model: 'gemini-2.5-flash',
+    apiKey: dotenv.env['GEMINI_API_KEY'] ?? '',
+  );
+  final _embeddingModel = GenerativeModel(
+    model: 'gemini-embedding-001',
+    apiKey: dotenv.env['GEMINI_API_KEY'] ?? '',
+  );
+  bool _isLoading = false;
+  int? _editingIndex; // index of user message being edited
+
+  late List<Map<String, dynamic>> _messages;
+  late Conversation _currentConversation;
+  bool _isInitialized = false;
+
+  // Health context tracking — used to build the system context prefix
+  int? _lastMood;
+  int? _lastEnergy;
+  double? _lastSleepHours;
+  String? _lastSleepQuality;
+  bool _contextInjectedThisSession = false;
+
+  // Voice input
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _isListening = false;
+  bool _speechAvailable = false;
+
+  // Image picker
+  final ImagePicker _imagePicker = ImagePicker();
+  // Staged attachments (multi-image before send)
+  final List<File> _pendingImages = [];
+
+  double _moodValue = 5.0;
+  double _energyValue = 5.0;
+
+  bool _isHighRiskDetected = false;
+  final List<String> _riskKeywords = [
+    'give up',
+    'no hope',
+    'harm',
+    'end it',
+    'cant take it anymore',
+    'worthless',
+    'better off without me',
+    'suicide',
+    'kill myself',
   ];
 
-  final List<String> _quickReplies = [
-    "I'm feeling anxious",
-    "Help me relax",
-    "Can't sleep",
-    "Feeling sad",
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _initializeConversation();
+    _initSpeech();
+    _msgController.addListener(_checkRiskLevel);
+  }
 
-  void _sendMessage(String text) {
+  Future<void> _initSpeech() async {
+    // Explicitly request mic permission — STT silently fails without it
+    final micStatus = await Permission.microphone.request();
+    if (!micStatus.isGranted) {
+      if (mounted) setState(() => _speechAvailable = false);
+      return;
+    }
+
+    // Re-initialize each time to ensure a fresh engine session
+    if (_speech.isAvailable) {
+      await _speech.stop();
+    }
+
+    _speechAvailable = await _speech.initialize(
+      onError: (e) {
+        debugPrint('STT error: ${e.errorMsg}');
+        if (mounted) setState(() => _isListening = false);
+      },
+      onStatus: (status) {
+        debugPrint('STT status: $status');
+        if (mounted) {
+          // Only mark as not-listening on final states
+          if (status == 'done' || status == 'notListening') {
+            setState(() => _isListening = false);
+          } else if (status == stt.SpeechToText.listeningStatus) {
+            setState(() => _isListening = true);
+          }
+        }
+      },
+      debugLogging: false,
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _initializeConversation() async {
+    // Always start completely fresh — clear any remembered session
+    await ConversationService.clearCurrentConversation();
+    _currentConversation = ConversationService.createNewConversation();
+    _messages = [];
+    // Reset context injection flag so the health prefix fires again on first message
+    _contextInjectedThisSession = false;
+    _lastMood = null;
+    _lastEnergy = null;
+    _lastSleepHours = null;
+    _lastSleepQuality = null;
+    print('Luna: System Online');
+    if (mounted) {
+      setState(() {
+        _isInitialized = true;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _msgController.dispose();
+    _scrollController.dispose();
+    _msgController.removeListener(_checkRiskLevel);
+    super.dispose();
+  }
+
+  void _checkRiskLevel() {
+    final text = _msgController.text.toLowerCase();
+    bool foundRisk = _riskKeywords.any((keyword) => text.contains(keyword));
+
+    if (foundRisk != _isHighRiskDetected) {
+      setState(() {
+        _isHighRiskDetected = foundRisk;
+      });
+    }
+  }
+
+  bool get _hasApiKeyConfigured {
+    final apiKey = dotenv.env['GEMINI_API_KEY'];
+    return apiKey != null && apiKey.trim().isNotEmpty;
+  }
+
+  void _showMissingApiKeyError() {
+    AppTheme.showCustomSnackBar(
+      context,
+      'Luna AI is not configured. Please add a valid GEMINI_API_KEY to your .env file.',
+      isError: true,
+    );
+  }
+
+  Future<void> _sendMessage(String text) async {
     if (text.trim().isEmpty) return;
+    if (!_hasApiKeyConfigured) {
+      _showMissingApiKeyError();
+      return;
+    }
+
+    // Generate title from first message
+    if (_messages.isEmpty) {
+      _currentConversation = Conversation(
+        id: _currentConversation.id,
+        title: ConversationService.generateTitleFromMessage(text),
+        messages: _currentConversation.messages,
+        createdAt: _currentConversation.createdAt,
+        lastModified: DateTime.now(),
+      );
+    }
+
+    // 1. Update UI with User's Message
     setState(() {
       _messages.add({
         'isBot': false,
@@ -52,250 +194,752 @@ class _AiChatScreenState extends State<AiChatScreen> {
         'time':
             '${TimeOfDay.now().hour}:${TimeOfDay.now().minute.toString().padLeft(2, '0')} AM',
       });
+      _isLoading = true;
     });
+
     _msgController.clear();
+
     Future.delayed(const Duration(milliseconds: 100), () {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
+
+    try {
+      // 2. Embed: Convert text into Vector
+      final embedContent = Content.text(text);
+      final embeddingResponse = await _embeddingModel.embedContent(
+        embedContent,
+      );
+      final List<double> vector = embeddingResponse.embedding.values;
+
+      // 3. Retrieve: Pass Vector to C++ engine to find closest local context
+      final List<Map<String, dynamic>> searchResults =
+          VectorEngineBridge.searchVector(vector, 3);
+
+      // 4. Construct System Context with C++ DB Results + Health Tracking Data
+      final prefs = await SharedPreferences.getInstance();
+      final latestSleepData =
+          prefs.getString('latest_sleep_data') ??
+          'No recent sleep log available.';
+
+      // --- Health context injection ---
+      // Read latest Mood, Energy, Sleep from SharedPreferences
+      final int currentMood = prefs.getInt('latest_mood') ?? -1;
+      final int currentEnergy = prefs.getInt('latest_energy') ?? -1;
+      final double currentSleepHours =
+          prefs.getDouble('latest_sleep_hours') ?? -1.0;
+      final String currentSleepQuality =
+          prefs.getString('latest_sleep_quality') ?? '';
+
+      // Determine whether health values have changed since last injection
+      final bool healthChanged =
+          currentMood != _lastMood ||
+          currentEnergy != _lastEnergy ||
+          currentSleepHours != _lastSleepHours ||
+          currentSleepQuality != _lastSleepQuality;
+
+      // Build the health context prefix only on first message or when data changed
+      String healthContextPrefix = '';
+      if (!_contextInjectedThisSession || healthChanged) {
+        if (currentMood >= 0 || currentEnergy >= 0 || currentSleepHours >= 0) {
+          final moodStr = currentMood >= 0 ? '${currentMood}/10' : 'unknown';
+          final energyStr = currentEnergy >= 0
+              ? '${currentEnergy}/10'
+              : 'unknown';
+          final sleepStr = currentSleepHours >= 0
+              ? '${currentSleepHours.toStringAsFixed(1)}hrs'
+                    '${currentSleepQuality.isNotEmpty ? ' ($currentSleepQuality)' : ''}'
+              : 'unknown';
+
+          healthContextPrefix =
+              '[Context: Mood $moodStr, Energy $energyStr, Sleep $sleepStr]\n\n';
+
+          // Remember what we injected
+          _lastMood = currentMood;
+          _lastEnergy = currentEnergy;
+          _lastSleepHours = currentSleepHours;
+          _lastSleepQuality = currentSleepQuality;
+          _contextInjectedThisSession = true;
+        }
+      }
+
+      String contextString = 'System Context:\n';
+      contextString += '- Recent Sleep Data: $latestSleepData\n';
+      for (var result in searchResults) {
+        contextString +=
+            '- Local DB Context [ID: ${result['id']}]: Found relevant data with distance ${result['distance'].toStringAsFixed(4)}\n';
+      }
+
+      final String fullPrompt =
+          '''
+You are Luna, a helpful privacy-first mental health companion app.
+Use the following local context from the user's C++ database if it's relevant to their query.
+
+$contextString
+
+${healthContextPrefix}User Question: $text
+''';
+
+      // 5. Generate: Send prompt + local context to Gemini Flash
+      final chatContent = [Content.text(fullPrompt)];
+      final response = await _model.generateContent(chatContent);
+      final String reply =
+          response.text ?? "Sorry, I couldn't generate a response.";
+      widget.onLiveStatusChanged?.call(true);
+
+      // 6. Update UI with Bot's response
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _messages.add({
+            'isBot': true,
+            'text': reply.trim(),
+            'time':
+                '${TimeOfDay.now().hour}:${TimeOfDay.now().minute.toString().padLeft(2, '0')} AM',
+          });
+        });
+
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (_scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+      }
+
+      // 7. Save conversation with messages
+      _currentConversation = Conversation(
+        id: _currentConversation.id,
+        title: _currentConversation.title,
+        messages: _messages,
+        createdAt: _currentConversation.createdAt,
+        lastModified: DateTime.now(),
+      );
+      await ConversationService.saveConversation(_currentConversation);
+    } catch (e) {
+      if (!mounted) return;
+
+      final String errorStr = e.toString().toLowerCase();
+      final statusCode =
+          RegExp(
+            r'\b(401|403|404|429|500|502|503)\b',
+          ).firstMatch(errorStr)?.group(0) ??
+          'unknown';
+      debugPrint('AI send error: $e [status=$statusCode]');
+      final bool isAuthError =
+          errorStr.contains('unauthorized') ||
+          errorStr.contains('invalid') ||
+          errorStr.contains('permission') ||
+          errorStr.contains('api key');
+      final bool isRateLimit =
+          errorStr.contains('429') ||
+          errorStr.contains('quota') ||
+          errorStr.contains('too many requests');
+
+      if (isAuthError) {
+        setState(() => _isLoading = false);
+        AppTheme.showCustomSnackBar(
+          context,
+          'Luna could not authenticate with Gemini. Check your GEMINI_API_KEY and Google Cloud billing.',
+          isError: true,
+        );
+      } else if (isRateLimit) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            backgroundColor: const Color(0xFF1E212B),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Color(0xFF00E5FF), width: 1),
+            ),
+            duration: const Duration(seconds: 6),
+            content: Row(
+              children: [
+                const Icon(
+                  Icons.hourglass_bottom_rounded,
+                  color: Color(0xFF00E5FF),
+                  size: 22,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Luna needs a breather! 🌙 Your Gemini key may be rate limited or out of quota.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 13,
+                      color: Colors.white,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      } else {
+        setState(() {
+          _isLoading = false;
+          _messages.add({
+            'isBot': true,
+            'text':
+                "Something went wrong on my end. Please try again in a moment. 💙",
+            'time':
+                '${TimeOfDay.now().hour}:${TimeOfDay.now().minute.toString().padLeft(2, '0')} AM',
+          });
+        });
+
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (_scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!_isInitialized) {
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        body: const Center(
+          child: CircularProgressIndicator(color: Color(0xFF00E5FF)),
+        ),
+      );
+    }
+
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: AppTheme.background,
+      endDrawer: _buildHistoryDrawer(),
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'LUMORA',
-                    style: GoogleFonts.playfairDisplay(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFF161A23),
-                      letterSpacing: 6.0,
-                    ),
+            // Header & Sliders
+            Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Luna AI',
+                        style: GoogleFonts.outfit(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textDark,
+                          letterSpacing: -0.5,
+                        ),
+                      ).animate().shimmer(
+                        duration: 2000.ms,
+                        color: const Color(0xFF00E5FF),
+                      ),
+                      GestureDetector(
+                        onTap: () => _scaffoldKey.currentState?.openEndDrawer(),
+                        child: SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: const Icon(
+                            Icons.menu_rounded,
+                            color: AppTheme.textDark,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  PopupMenuButton<String>(
-                    color: const Color(0xFF1E212B),
-                    elevation: 8,
-                    onSelected: (value) async {
-                      if (value == 'signout') {
-                        await AuthService().signOut();
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      PopupMenuItem(
-                        value: 'signout',
-                        child: Row(
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 4),
+
+            // Messages
+            Expanded(
+              child: _messages.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.logout, color: Color(0xFF00E5FF), size: 20),
-                            const SizedBox(width: 12),
+                            Icon(
+                              Icons.smart_toy_rounded,
+                              size: 40,
+                              color: const Color(0xFF00E5FF).withOpacity(0.35),
+                            ),
+                            const SizedBox(height: 20),
                             Text(
-                              'Sign Out', 
+                              'How can Luna support you today?',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.playfairDisplay(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(
+                                  0xFF161A23,
+                                ).withOpacity(0.75),
+                                height: 1.3,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Mental check-ins, study stress, sleep insights, or just to feel heard.',
+                              textAlign: TextAlign.center,
                               style: GoogleFonts.dmSans(
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
+                                fontSize: 14,
+                                color: const Color(
+                                  0xFF161A23,
+                                ).withOpacity(0.45),
+                                height: 1.6,
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ],
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: Colors.white.withOpacity(0.1)),
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      itemCount: _messages.length + (_isLoading ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index == _messages.length && _isLoading) {
+                          return _buildTypingIndicator();
+                        }
+                        final msg = _messages[index];
+                        final isUser = !(msg['isBot'] as bool);
+                        return _ChatBubble(
+                          message: msg,
+                          onEdit: isUser && !_isLoading
+                              ? () => _startEdit(index)
+                              : null,
+                        );
+                      },
                     ),
-                    offset: const Offset(0, 45),
-                    child: const CircleAvatar(
-                      radius: 20,
-                      backgroundColor: Color(0xFFE2E8F0),
-                      child: Icon(Icons.person, color: Color(0xFF64748B)),
-                    ),
-                  ),
-                ],
-              ),
             ),
 
-            // Luna profile
-            Column(
-              children: [
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: const Color(0xFF00E5FF).withOpacity(0.3),
-                          width: 2.5,
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: 68,
-                      height: 68,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Color(0xFF1E212B),
-                      ),
-                      child: const Icon(
-                        Icons.smart_toy_rounded,
-                        color: Color(0xFF00E5FF),
-                        size: 36,
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 6,
-                      right: 6,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: BoxDecoration(
-                          color: Colors.green,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: AppTheme.background,
-                            width: 2,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Luna AI',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textDark,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Listening & Supporting',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 13,
-                    color: AppTheme.textLight,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Messages
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: _messages.length,
-                itemBuilder: (context, index) {
-                  final msg = _messages[index];
-                  return _ChatBubble(message: msg);
-                },
-              ),
-            ),
-
-            // Quick replies
-            SizedBox(
-              height: 44,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: _quickReplies.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  return GestureDetector(
-                    onTap: () => _sendMessage(_quickReplies[index]),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E212B),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.3)),
-                      ),
-                      child: Text(
-                        _quickReplies[index],
-                        style: GoogleFonts.dmSans(
-                          fontSize: 13,
-                          color: const Color(0xFF00E5FF),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 10),
-
+            // --- Bottom input area ---
             Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               decoration: const BoxDecoration(
                 color: Color(0xFF1E212B),
                 border: Border(top: BorderSide(color: Color(0xFF2A2E3B))),
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
+                  // --- Proactive Safety Banner ---
+                  if (_isHighRiskDetected)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.symmetric(
                         horizontal: 16,
-                        vertical: 10,
+                        vertical: 12,
                       ),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2A2E3B),
-                        borderRadius: BorderRadius.circular(24),
+                        color: const Color(0xFFFF4B4B).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: const Color(0xFFFF4B4B).withOpacity(0.4),
+                        ),
                       ),
-                      child: TextField(
-                        controller: _msgController,
-                        style: GoogleFonts.dmSans(
-                          fontSize: 14,
-                          color: Colors.white,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'Type a message...',
-                          hintStyle: GoogleFonts.dmSans(
-                            fontSize: 14,
-                            color: Colors.grey,
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.favorite,
+                                color: Color(0xFFFF4B4B),
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  "You're not alone. Help is available right now.",
+                                  style: GoogleFonts.dmSans(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        onSubmitted: _sendMessage,
+                          const SizedBox(height: 12),
+                          ElevatedButton(
+                            onPressed: () {
+                              // Reassuring dialog before switching to Care Hub
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: const Color(0xFF1E212B),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  title: Text(
+                                    "Help is Here",
+                                    style: GoogleFonts.dmSans(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  content: Text(
+                                    "We're connecting you to our Care Hub. Please talk to a verified professional or use our emergency resources.",
+                                    style: GoogleFonts.dmSans(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: Text(
+                                        "CANCEL",
+                                        style: GoogleFonts.dmSans(
+                                          color: Colors.white54,
+                                        ),
+                                      ),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: () {
+                                        Navigator.pop(ctx); // Close dialog
+                                        _msgController
+                                            .clear(); // Clear high risk message
+                                        // Since we are in the Shell, we can't easily switch tabs without a key or controller,
+                                        // but for this evolution we'll show the intent.
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              "Redirecting to Care Hub...",
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(
+                                          0xFFFF4B4B,
+                                        ),
+                                      ),
+                                      child: const Text(
+                                        "CONTINUE",
+                                        style: TextStyle(color: Colors.white),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFFF4B4B),
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(double.infinity, 44),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 0,
+                            ),
+                            child: Text(
+                              'Connect to a Professional',
+                              style: GoogleFonts.dmSans(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ).animate().fadeIn().slideY(begin: 0.2, end: 0),
+                  // Attachment preview strip (shown when images are staged)
+                  if (_pendingImages.isNotEmpty)
+                    Container(
+                      height: 100,
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _pendingImages.length + 1,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          // Last item = "Add more" button
+                          if (index == _pendingImages.length) {
+                            return GestureDetector(
+                              onTap: _openMediaPicker,
+                              child: Container(
+                                width: 80,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF2A2E3B),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: const Color(
+                                      0xFF00E5FF,
+                                    ).withOpacity(0.4),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_photo_alternate_rounded,
+                                      color: Color(0xFF00E5FF),
+                                      size: 22,
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Add',
+                                      style: TextStyle(
+                                        color: Color(0xFF00E5FF),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
+                          // Image thumbnail with remove button
+                          return Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.file(
+                                  _pendingImages[index],
+                                  width: 80,
+                                  height: 80,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              Positioned(
+                                top: 2,
+                                right: 2,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(
+                                      () => _pendingImages.removeAt(index),
+                                    );
+                                  },
+                                  child: Container(
+                                    width: 20,
+                                    height: 20,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.black54,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.close,
+                                      color: Colors.white,
+                                      size: 13,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: () => _sendMessage(_msgController.text),
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Color(0xFF00E5FF),
-                      ),
-                      child: const Icon(
-                        Icons.send_rounded,
-                        color: Colors.black,
-                        size: 20,
-                      ),
+
+                  // Input row
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      _pendingImages.isNotEmpty ? 8 : 12,
+                      16,
+                      12 + MediaQuery.of(context).padding.bottom,
+                    ),
+                    child: Row(
+                      children: [
+                        // Mic button
+                        GestureDetector(
+                          onTap: _handleVoiceInput,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _isListening
+                                  ? const Color(0xFFFF4B4B)
+                                  : const Color(0xFF2A2E3B),
+                              boxShadow: _isListening
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(
+                                          0xFFFF4B4B,
+                                        ).withOpacity(0.5),
+                                        blurRadius: 12,
+                                        spreadRadius: 2,
+                                      ),
+                                    ]
+                                  : [],
+                            ),
+                            child: Icon(
+                              _isListening
+                                  ? Icons.mic_rounded
+                                  : Icons.mic_none_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // Text field + attach
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _editingIndex != null
+                                  ? const Color(0xFF2A2E3B)
+                                  : const Color(0xFF252A36),
+                              borderRadius: BorderRadius.circular(28),
+                              border: _editingIndex != null
+                                  ? Border.all(
+                                      color: const Color(
+                                        0xFF00E5FF,
+                                      ).withOpacity(0.5),
+                                      width: 1,
+                                    )
+                                  : null,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _msgController,
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 14,
+                                      color: Colors.white,
+                                    ),
+                                    decoration: InputDecoration(
+                                      hintText: _editingIndex != null
+                                          ? 'Editing message…'
+                                          : _pendingImages.isEmpty
+                                          ? 'Ask Luna anything...'
+                                          : 'Add a caption… (optional)',
+                                      hintStyle: GoogleFonts.dmSans(
+                                        fontSize: 14,
+                                        color: _editingIndex != null
+                                            ? const Color(
+                                                0xFF00E5FF,
+                                              ).withOpacity(0.6)
+                                            : Colors.grey,
+                                      ),
+                                      border: InputBorder.none,
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                    onSubmitted: (_) => _handleSend(),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                if (_editingIndex != null)
+                                  GestureDetector(
+                                    onTap: _cancelEdit,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: const Color(
+                                          0xFF00E5FF,
+                                        ).withOpacity(0.15),
+                                      ),
+                                      child: const Icon(
+                                        Icons.close_rounded,
+                                        color: Color(0xFF00E5FF),
+                                        size: 18,
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  GestureDetector(
+                                    onTap: _openMediaPicker,
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: const BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: Color(0xFF1E212B),
+                                          ),
+                                          child: Icon(
+                                            Icons.attach_file_rounded,
+                                            color: _pendingImages.isNotEmpty
+                                                ? const Color(0xFF00E5FF)
+                                                : Colors.white54,
+                                            size: 18,
+                                          ),
+                                        ),
+                                        if (_pendingImages.isNotEmpty)
+                                          Positioned(
+                                            right: 0,
+                                            top: 0,
+                                            child: Container(
+                                              width: 16,
+                                              height: 16,
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xFF00E5FF),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  '${_pendingImages.length}',
+                                                  style: const TextStyle(
+                                                    fontSize: 10,
+                                                    color: Colors.black,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // Send / Pause button
+                        GestureDetector(
+                          onTap: _handleSend,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _isLoading
+                                  ? const Color(0xFFFF6B6B)
+                                  : const Color(0xFF00E5FF),
+                            ),
+                            child: Icon(
+                              _isLoading
+                                  ? Icons.pause_rounded
+                                  : Icons.send_rounded,
+                              color: Colors.black,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -306,12 +950,687 @@ class _AiChatScreenState extends State<AiChatScreen> {
       ),
     );
   }
+
+  Widget _buildHistoryDrawer() {
+    return Drawer(
+      backgroundColor: const Color(0xFF1E212B),
+      child: StatefulBuilder(
+        builder: (context, setDrawerState) {
+          return FutureBuilder<List<Conversation>>(
+            future: ConversationService.getAllConversations(),
+            builder: (context, snapshot) {
+              final conversations = snapshot.data ?? [];
+              return Column(
+                children: [
+                  // Drawer header
+                  SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 12, 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Chats',
+                            style: GoogleFonts.playfairDisplay(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              // New chat button
+                              IconButton(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  _initializeConversation();
+                                },
+                                icon: const Icon(
+                                  Icons.add_rounded,
+                                  color: Color(0xFF00E5FF),
+                                ),
+                                tooltip: 'New Chat',
+                              ),
+                              // Clear all button
+                              if (conversations.isNotEmpty)
+                                IconButton(
+                                  onPressed: () async {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        backgroundColor: const Color(
+                                          0xFF1E212B,
+                                        ),
+                                        title: Text(
+                                          'Clear All?',
+                                          style: GoogleFonts.dmSans(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        content: Text(
+                                          'This will delete all conversations.',
+                                          style: GoogleFonts.dmSans(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, false),
+                                            child: Text(
+                                              'Cancel',
+                                              style: GoogleFonts.dmSans(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, true),
+                                            child: Text(
+                                              'Delete All',
+                                              style: GoogleFonts.dmSans(
+                                                color: const Color(0xFFFF6B6B),
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true) {
+                                      await ConversationService.clearAllConversations();
+                                      _initializeConversation();
+                                      if (context.mounted) {
+                                        Navigator.pop(context);
+                                      }
+                                    }
+                                  },
+                                  icon: Icon(
+                                    Icons.delete_sweep_rounded,
+                                    color: Colors.white.withOpacity(0.5),
+                                  ),
+                                  tooltip: 'Clear All',
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Divider(color: Color(0xFF2A2E3B), height: 1),
+                  // List
+                  Expanded(
+                    child: !snapshot.hasData
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                              color: Color(0xFF00E5FF),
+                            ),
+                          )
+                        : conversations.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.chat_bubble_outline_rounded,
+                                  size: 48,
+                                  color: Colors.white.withOpacity(0.2),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No conversations yet',
+                                  style: GoogleFonts.dmSans(
+                                    fontSize: 14,
+                                    color: Colors.white.withOpacity(0.4),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 8,
+                              horizontal: 12,
+                            ),
+                            itemCount: conversations.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 4),
+                            itemBuilder: (context, index) {
+                              final conv = conversations[index];
+                              final isActive =
+                                  conv.id == _currentConversation.id;
+                              return Material(
+                                color: isActive
+                                    ? const Color(0xFF00E5FF).withOpacity(0.12)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(12),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    _loadConversation(conv);
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.chat_rounded,
+                                          size: 18,
+                                          color: isActive
+                                              ? const Color(0xFF00E5FF)
+                                              : Colors.white.withOpacity(0.5),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                conv.title,
+                                                style: GoogleFonts.dmSans(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: isActive
+                                                      ? const Color(0xFF00E5FF)
+                                                      : Colors.white,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                '${conv.messages.length} messages',
+                                                style: GoogleFonts.dmSans(
+                                                  fontSize: 11,
+                                                  color: Colors.white
+                                                      .withOpacity(0.4),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // Delete button
+                                        GestureDetector(
+                                          onTap: () async {
+                                            await ConversationService.deleteConversation(
+                                              conv.id,
+                                            );
+                                            if (isActive)
+                                              _initializeConversation();
+                                            setDrawerState(
+                                              () {},
+                                            ); // refresh drawer list
+                                          },
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(4),
+                                            child: Icon(
+                                              Icons.delete_outline_rounded,
+                                              size: 18,
+                                              color: Colors.white.withOpacity(
+                                                0.4,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void _loadConversation(Conversation conversation) {
+    setState(() {
+      _currentConversation = conversation;
+      _messages = conversation.messages;
+    });
+
+    // Auto-scroll to bottom
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  Future<void> _handleVoiceInput() async {
+    if (!mounted) return;
+
+    if (_isListening) {
+      // Tap again to stop — text stays in field for review
+      await _speech.stop();
+      setState(() => _isListening = false);
+      return;
+    }
+
+    // Always re-init before listening to ensure a fresh Android engine session.
+    // This is the fix for "mic starts and immediately closes" on Android.
+    await _initSpeech();
+
+    if (!_speechAvailable) {
+      if (!mounted) return;
+      AppTheme.showCustomSnackBar(
+        context,
+        'Microphone permission is required for voice input.',
+        action: SnackBarAction(
+          label: 'Settings',
+          textColor: const Color(0xFF00E5FF),
+          onPressed: () => openAppSettings(),
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _isListening = true);
+    _msgController.clear();
+
+    await _speech.listen(
+      onResult: (result) {
+        if (mounted) {
+          setState(() {
+            _msgController.text = result.recognizedWords;
+            _msgController.selection = TextSelection.fromPosition(
+              TextPosition(offset: _msgController.text.length),
+            );
+          });
+        }
+      },
+      listenFor: const Duration(minutes: 2),
+      pauseFor: const Duration(seconds: 30),
+      listenOptions: stt.SpeechListenOptions(
+        partialResults: true,
+        cancelOnError: false,
+        autoPunctuation: true,
+      ),
+    );
+  }
+
+  // Called when user wants to edit a previously sent message
+  void _startEdit(int index) {
+    final msg = _messages[index];
+    setState(() {
+      _editingIndex = index;
+      _msgController.text = msg['text'] as String? ?? '';
+      _msgController.selection = TextSelection.fromPosition(
+        TextPosition(offset: _msgController.text.length),
+      );
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      _editingIndex = null;
+      _msgController.clear();
+    });
+  }
+
+  // Unified send: handles text-only, image(s)-only, or text + images
+  Future<void> _handleSend() async {
+    // If loading, cancel (pause) the current request
+    if (_isLoading) {
+      setState(() {
+        _isLoading = false;
+        // Remove the typing indicator by not adding a bot message
+      });
+      return;
+    }
+
+    final text = _msgController.text.trim();
+    final hasImages = _pendingImages.isNotEmpty;
+    if (text.isEmpty && !hasImages) return;
+
+    // If editing a previous message, re-send from that point
+    if (_editingIndex != null) {
+      final idx = _editingIndex!;
+      setState(() {
+        // Trim all messages from the edited one onward
+        _messages.removeRange(idx, _messages.length);
+        _editingIndex = null;
+      });
+      _msgController.clear();
+      await _sendMessage(text);
+      return;
+    }
+
+    if (hasImages) {
+      final images = List<File>.from(_pendingImages);
+      setState(() => _pendingImages.clear());
+      await _sendImageMessage(images, caption: text);
+      _msgController.clear();
+    } else {
+      _sendMessage(text);
+    }
+  }
+
+  Future<void> _openMediaPicker() async {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E212B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _pendingImages.isEmpty ? 'Add media' : 'Add more photos',
+                style: GoogleFonts.dmSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildMediaOption(
+                ctx,
+                Icons.photo_library_rounded,
+                'Photo from Gallery',
+                'Pick one or more images from your library',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  // Pick multiple images
+                  final List<XFile> files = await _imagePicker.pickMultiImage(
+                    imageQuality: 85,
+                  );
+                  if (files.isNotEmpty && mounted) {
+                    setState(() {
+                      for (final f in files) {
+                        _pendingImages.add(File(f.path));
+                      }
+                    });
+                  }
+                },
+              ),
+              _buildMediaOption(
+                ctx,
+                Icons.camera_alt_rounded,
+                'Take a Photo',
+                'Use camera to capture an image',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final XFile? file = await _imagePicker.pickImage(
+                    source: ImageSource.camera,
+                    imageQuality: 85,
+                  );
+                  if (file != null && mounted) {
+                    setState(() => _pendingImages.add(File(file.path)));
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMediaOption(
+    BuildContext ctx,
+    IconData icon,
+    String title,
+    String subtitle, {
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: const Color(0xFF2A2E3B),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: const Color(0xFF00E5FF), size: 22),
+      ),
+      title: Text(
+        title,
+        style: GoogleFonts.dmSans(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: GoogleFonts.dmSans(color: Colors.white54, fontSize: 12),
+      ),
+      onTap: onTap,
+    );
+  }
+
+  Future<void> _sendImageMessage(
+    List<File> imageFiles, {
+    String caption = '',
+  }) async {
+    final time =
+        '${TimeOfDay.now().hour}:${TimeOfDay.now().minute.toString().padLeft(2, '0')} AM';
+
+    // Show each image as its own bubble (with caption on last one)
+    setState(() {
+      for (int i = 0; i < imageFiles.length; i++) {
+        _messages.add({
+          'isBot': false,
+          'text': (i == imageFiles.length - 1 && caption.isNotEmpty)
+              ? caption
+              : '',
+          'imagePath': imageFiles[i].path,
+          'time': time,
+        });
+      }
+      _isLoading = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+
+    if (!_hasApiKeyConfigured) {
+      _showMissingApiKeyError();
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      // Build multimodal parts: all images + optional caption + system prompt
+      final parts = <Part>[];
+      for (final file in imageFiles) {
+        final bytes = await file.readAsBytes();
+        parts.add(DataPart('image/jpeg', bytes));
+      }
+      final userText = caption.isNotEmpty
+          ? caption
+          : 'Please analyze this image and respond empathetically as Luna, a mental health companion.';
+      parts.add(TextPart(userText));
+
+      final response = await _model.generateContent([Content.multi(parts)]);
+      final reply = response.text ?? "Sorry, I couldn't analyze the image(s).";
+      widget.onLiveStatusChanged?.call(true);
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _messages.add({'isBot': true, 'text': reply.trim(), 'time': time});
+        });
+
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (_scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+
+        _currentConversation = Conversation(
+          id: _currentConversation.id,
+          title: _currentConversation.messages.isEmpty
+              ? (caption.isNotEmpty ? caption : 'Image conversation')
+              : _currentConversation.title,
+          messages: _messages,
+          createdAt: _currentConversation.createdAt,
+          lastModified: DateTime.now(),
+        );
+        await ConversationService.saveConversation(_currentConversation);
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      final String errorStr = e.toString().toLowerCase();
+      final statusCode =
+          RegExp(
+            r'\b(401|403|404|429|500|502|503)\b',
+          ).firstMatch(errorStr)?.group(0) ??
+          'unknown';
+      debugPrint('AI image send error: $e [status=$statusCode]');
+      final bool isAuthError =
+          errorStr.contains('unauthorized') ||
+          errorStr.contains('invalid') ||
+          errorStr.contains('permission') ||
+          errorStr.contains('api key');
+      final bool isRateLimit =
+          errorStr.contains('429') ||
+          errorStr.contains('quota') ||
+          errorStr.contains('too many requests');
+
+      if (isAuthError) {
+        setState(() => _isLoading = false);
+        AppTheme.showCustomSnackBar(
+          context,
+          'Luna could not authenticate with Gemini. Check your GEMINI_API_KEY and Google Cloud billing.',
+          isError: true,
+        );
+      } else if (isRateLimit) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            backgroundColor: const Color(0xFF1E212B),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Color(0xFF00E5FF), width: 1),
+            ),
+            duration: const Duration(seconds: 6),
+            content: Row(
+              children: [
+                const Icon(
+                  Icons.hourglass_bottom_rounded,
+                  color: Color(0xFF00E5FF),
+                  size: 22,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Luna needs a breather! 🌙 Your Gemini key may be rate limited or out of quota.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 13,
+                      color: Colors.white,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      } else {
+        setState(() {
+          _isLoading = false;
+          _messages.add({
+            'isBot': true,
+            'text':
+                "Something went wrong analyzing the image(s). Please try again. 💙",
+            'time': time,
+          });
+        });
+      }
+    }
+  }
+
+  Widget _buildTypingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFF1E212B),
+            ),
+            child: const Icon(
+              Icons.smart_toy_rounded,
+              color: Color(0xFF00E5FF),
+              size: 18,
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFF1E212B),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+                bottomLeft: Radius.circular(4),
+                bottomRight: Radius.circular(18),
+              ),
+            ),
+            child: Text(
+              'Luna is replying...',
+              style: GoogleFonts.dmSans(
+                fontSize: 13,
+                color: Colors.white54,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ChatBubble extends StatelessWidget {
   final Map<String, dynamic> message;
+  final VoidCallback? onEdit;
 
-  const _ChatBubble({required this.message});
+  const _ChatBubble({required this.message, this.onEdit});
 
   @override
   Widget build(BuildContext context) {
@@ -349,9 +1668,13 @@ class _ChatBubble extends StatelessWidget {
               ],
               Flexible(
                 child: Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: message['imagePath'] != null
+                      ? const EdgeInsets.all(4)
+                      : const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: isBot ? const Color(0xFF1E212B) : const Color(0xFF00E5FF),
+                    color: isBot
+                        ? const Color(0xFF1E212B)
+                        : const Color(0xFF00E5FF),
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(18),
                       topRight: const Radius.circular(18),
@@ -366,14 +1689,87 @@ class _ChatBubble extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: Text(
-                    message['text'] as String,
-                    style: GoogleFonts.dmSans(
-                      fontSize: 14,
-                      color: isBot ? Colors.white : Colors.black,
-                      height: 1.5,
-                    ),
-                  ),
+                  child: message['imagePath'] != null
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: Image.file(
+                                File(message['imagePath'] as String),
+                                width: 200,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            if ((message['text'] as String?)?.isNotEmpty ==
+                                true) ...[
+                              const SizedBox(height: 6),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                child: Text(
+                                  message['text'] as String,
+                                  style: GoogleFonts.dmSans(
+                                    fontSize: 13,
+                                    color: isBot
+                                        ? Colors.white70
+                                        : Colors.black87,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        )
+                      : isBot
+                      ? MarkdownBody(
+                          data: message['text'] as String,
+                          styleSheet: MarkdownStyleSheet(
+                            p: GoogleFonts.dmSans(
+                              fontSize: 14,
+                              color: Colors.white,
+                              height: 1.5,
+                            ),
+                            strong: GoogleFonts.dmSans(
+                              fontSize: 14,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              height: 1.5,
+                            ),
+                            em: GoogleFonts.dmSans(
+                              fontSize: 14,
+                              color: Colors.white70,
+                              fontStyle: FontStyle.italic,
+                              height: 1.5,
+                            ),
+                            listBullet: GoogleFonts.dmSans(
+                              fontSize: 14,
+                              color: Colors.white,
+                            ),
+                            blockquote: GoogleFonts.dmSans(
+                              fontSize: 13,
+                              color: Colors.white70,
+                              fontStyle: FontStyle.italic,
+                            ),
+                            code: GoogleFonts.dmMono(
+                              fontSize: 13,
+                              color: const Color(0xFF00E5FF),
+                              backgroundColor: const Color(0xFF2A2E3B),
+                            ),
+                          ),
+                          shrinkWrap: true,
+                        )
+                      : Text(
+                          message['text'] as String,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 14,
+                            color: Colors.black,
+                            height: 1.5,
+                          ),
+                        ),
                 ),
               ),
               if (!isBot) ...[
@@ -400,12 +1796,30 @@ class _ChatBubble extends StatelessWidget {
               right: isBot ? 0 : 48,
               top: 4,
             ),
-            child: Text(
-              message['time'] as String,
-              style: GoogleFonts.dmSans(
-                fontSize: 11,
-                color: AppTheme.textLight,
-              ),
+            child: Row(
+              mainAxisAlignment: isBot
+                  ? MainAxisAlignment.start
+                  : MainAxisAlignment.end,
+              children: [
+                Text(
+                  message['time'] as String,
+                  style: GoogleFonts.dmSans(
+                    fontSize: 11,
+                    color: AppTheme.textLight,
+                  ),
+                ),
+                if (!isBot && onEdit != null) ...[
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: onEdit,
+                    child: const Icon(
+                      Icons.edit_rounded,
+                      size: 13,
+                      color: Color(0xFF00E5FF),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
           if (showBreathing) ...[

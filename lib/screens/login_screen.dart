@@ -39,12 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(e.toString()),
-              backgroundColor: Colors.red[400],
-            ),
-          );
+          AppTheme.showCustomSnackBar(context, e.toString(), isError: true);
         }
       } finally {
         if (mounted) setState(() => _isLoading = false);
@@ -81,158 +76,188 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Logo and App Name
-                Row(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFF6F5F2),
+              Color(0xFFE8F9FA), // Subtle cyan tint
+              Color(0xFFF6F5F2),
+            ],
+            stops: [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const Icon(Icons.spa, color: Color(0xFF00E5FF), size: 28),
-                    const SizedBox(width: 8),
+                    // App Name
                     Text(
                       'LUMORA',
                       style: GoogleFonts.playfairDisplay(
-                        fontSize: 20,
+                        fontSize: 32,
                         fontWeight: FontWeight.w800,
                         color: AppTheme.textDark,
-                        letterSpacing: 4.0,
+                        letterSpacing: 8.0,
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 48),
+                    const SizedBox(height: 48),
 
-                // Headings
-                Text(
-                  'Welcome back',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.textDark,
-                    height: 1.1,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Log in to continue your journey.',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 15,
-                    color: AppTheme.textMedium,
-                  ),
-                ),
-                const SizedBox(height: 40),
-
-                // Form Fields
-                _buildInputLabel('Email Address'),
-                _buildTextField(
-                  controller: _emailController,
-                  hintText: 'name@example.com',
-                  icon: Icons.email_outlined,
-                  keyboardType: TextInputType.emailAddress,
-                  validator: _validateEmail,
-                ),
-                const SizedBox(height: 24),
-
-                _buildInputLabel('Password'),
-                _buildTextField(
-                  controller: _passwordController,
-                  hintText: '••••••••••••',
-                  icon: Icons.lock_outline,
-                  obscureText: _obscurePassword,
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                      color: AppTheme.textMedium,
-                      size: 20,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
-                  validator: _validatePassword,
-                ),
-                const SizedBox(height: 40),
-
-                // Login Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _handleLogin,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00E5FF),
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(28),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: _isLoading 
-                      ? const SizedBox(
-                          height: 24,
-                          width: 24,
-                          child: CircularProgressIndicator(
-                            color: Colors.black,
-                            strokeWidth: 2,
+                    // Elegant Card for Form
+                    Container(
+                      padding: const EdgeInsets.all(32),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(32),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.textDark.withOpacity(0.04),
+                            blurRadius: 24,
+                            spreadRadius: 0,
+                            offset: const Offset(0, 12),
                           ),
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              'Log In',
-                              style: GoogleFonts.dmSans(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.arrow_forward, size: 20),
-                          ],
-                        ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Signup Link
-                Center(
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (context) => const SignupScreen()),
-                      );
-                    },
-                    child: RichText(
-                      text: TextSpan(
-                        text: 'Don\'t have an account? ',
-                        style: GoogleFonts.dmSans(
-                          fontSize: 14,
-                          color: AppTheme.textMedium,
-                        ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          TextSpan(
-                            text: 'Sign up',
+                          Text(
+                            'Welcome back',
                             style: GoogleFonts.dmSans(
-                              fontSize: 14,
-                              color: const Color(0xFF00E5FF),
-                              fontWeight: FontWeight.w600,
-                              decoration: TextDecoration.underline,
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.textDark,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Log in to continue your journey.',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 15,
+                              color: AppTheme.textMedium,
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+
+                          // Form Fields
+                          _buildInputLabel('Email Address'),
+                          _buildTextField(
+                            controller: _emailController,
+                            hintText: 'name@example.com',
+                            icon: Icons.email_outlined,
+                            keyboardType: TextInputType.emailAddress,
+                            validator: _validateEmail,
+                          ),
+                          const SizedBox(height: 24),
+
+                          _buildInputLabel('Password'),
+                          _buildTextField(
+                            controller: _passwordController,
+                            hintText: '••••••••••••',
+                            icon: Icons.lock_outline,
+                            obscureText: _obscurePassword,
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                                color: AppTheme.textMedium,
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePassword = !_obscurePassword;
+                                });
+                              },
+                            ),
+                            validator: _validatePassword,
+                          ),
+                          const SizedBox(height: 40),
+
+                          // Login Button
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: ElevatedButton(
+                              onPressed: _handleLogin,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF00E5FF),
+                                foregroundColor: Colors.black,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(28),
+                                ),
+                              ),
+                              child: _isLoading 
+                                ? const SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.black,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        'Log In',
+                                        style: GoogleFonts.dmSans(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.arrow_forward, size: 20),
+                                    ],
+                                  ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 32),
+
+                    // Signup Link
+                    Center(
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (context) => const SignupScreen()),
+                          );
+                        },
+                        child: RichText(
+                          text: TextSpan(
+                            text: 'Don\'t have an account? ',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 15,
+                              color: AppTheme.textMedium,
+                            ),
+                            children: [
+                              TextSpan(
+                                text: 'Sign up',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 15,
+                                  color: AppTheme.textDark,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -284,8 +309,8 @@ class _LoginScreenState extends State<LoginScreen> {
           borderSide: BorderSide.none,
         ),
         filled: true,
-        fillColor: const Color(0xFFF7F5F0), // Use same off-white color directly inside TextFormField
-        contentPadding: const EdgeInsets.symmetric(vertical: 16.0),
+        fillColor: const Color(0xFFF8F9FA), // Softer, cooler off-white for contrast inside the white card
+        contentPadding: const EdgeInsets.symmetric(vertical: 18.0),
         errorStyle: GoogleFonts.dmSans(
           color: Colors.red[400],
         ),

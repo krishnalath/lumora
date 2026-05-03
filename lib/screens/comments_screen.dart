@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/firestore_service.dart';
+import '../theme/app_theme.dart';
 
 class CommentsScreen extends StatefulWidget {
   final String postId;
@@ -37,12 +38,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
       _commentController.clear();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString(), style: const TextStyle(color: Colors.white)),
-            backgroundColor: Colors.red[400],
-          ),
-        );
+        AppTheme.showCustomSnackBar(context, e.toString(), isError: true);
       }
     } finally {
       if (mounted) setState(() => _isSending = false);

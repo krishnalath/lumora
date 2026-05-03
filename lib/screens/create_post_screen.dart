@@ -34,15 +34,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void _submitPost() async {
     // Basic validation
     if (_titleController.text.trim().isEmpty || _bodyController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Please enter a title and description',
-            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: Color(0xFF00E5FF),
-        ),
-      );
+      AppTheme.showCustomSnackBar(context, 'Please enter a title and description', isError: true);
       return;
     }
     
@@ -60,12 +52,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString(), style: const TextStyle(color: Colors.white)),
-            backgroundColor: Colors.red[400],
-          ),
-        );
+        AppTheme.showCustomSnackBar(context, e.toString(), isError: true);
       }
     } finally {
       if (mounted) {

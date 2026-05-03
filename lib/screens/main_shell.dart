@@ -4,7 +4,7 @@ import '../theme/app_theme.dart';
 import 'home_screen.dart';
 import 'journal_screen.dart';
 import 'ai_chat_screen.dart';
-import 'community_screen.dart';
+import 'care_hub_screen.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -15,13 +15,27 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
+  bool _isAiOnline = false;
+  late final List<Widget> _screens;
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    JournalScreen(),
-    AiChatScreen(),
-    CommunityScreen(),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+      const HomeScreen(),
+      const JournalScreen(),
+      AiChatScreen(onLiveStatusChanged: _handleAiStatus),
+      const CareHubScreen(),
+    ];
+  }
+
+  void _handleAiStatus(bool isOnline) {
+    if (mounted) {
+      setState(() {
+        _isAiOnline = isOnline;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,11 +68,13 @@ class _MainShellState extends State<MainShell> {
                   icon: Icons.smart_toy_rounded,
                   label: 'AI CHAT',
                   isSelected: _currentIndex == 2,
+                  showStatusDot: true,
+                  isStatusOnline: _isAiOnline,
                   onTap: () => setState(() => _currentIndex = 2),
                 ),
                 _NavItem(
-                  icon: Icons.group_rounded,
-                  label: 'COMMUNITY',
+                  icon: Icons.health_and_safety_rounded,
+                  label: 'CARE HUB',
                   isSelected: _currentIndex == 3,
                   onTap: () => setState(() => _currentIndex = 3),
                 ),
@@ -75,6 +91,8 @@ class _NavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool isSelected;
+  final bool showStatusDot;
+  final bool isStatusOnline;
   final VoidCallback onTap;
 
   const _NavItem({
@@ -82,6 +100,8 @@ class _NavItem extends StatelessWidget {
     required this.label,
     required this.isSelected,
     required this.onTap,
+    this.showStatusDot = false,
+    this.isStatusOnline = false,
   });
 
   @override
@@ -94,10 +114,29 @@ class _NavItem extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              icon,
-              color: isSelected ? const Color(0xFF00E5FF) : Colors.grey,
-              size: 24,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(
+                  icon,
+                  color: isSelected ? const Color(0xFF00E5FF) : Colors.grey,
+                  size: 24,
+                ),
+                if (showStatusDot)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: isStatusOnline ? Colors.green : Colors.red,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 4),
             Text(

@@ -18,29 +18,51 @@ class _JournalScreenState extends State<JournalScreen> {
   DateTime? _selectedDate;
   String _selectedTag = 'All';
 
-  final List<String> _tags = ['All', 'Calm', 'Grateful', 'Anxious', 'Reflective', 'Inspired', 'Tired'];
+  final List<String> _tags = [
+    'All',
+    'Calm',
+    'Grateful',
+    'Anxious',
+    'Reflective',
+    'Inspired',
+    'Tired',
+  ];
 
   Color _getTagColor(String tag) {
     switch (tag.toUpperCase()) {
-      case 'CALM': return const Color(0xFF00E5FF).withOpacity(0.15);
-      case 'GRATEFUL': return Colors.green.withOpacity(0.15);
-      case 'ANXIOUS': return Colors.orange.withOpacity(0.15);
-      case 'REFLECTIVE': return Colors.purple.withOpacity(0.15);
-      case 'INSPIRED': return Colors.amber.withOpacity(0.15);
-      case 'TIRED': return Colors.blueGrey.withOpacity(0.15);
-      default: return Colors.grey.withOpacity(0.15);
+      case 'CALM':
+        return AppTheme.primary.withOpacity(0.15);
+      case 'GRATEFUL':
+        return AppTheme.accentGreen.withOpacity(0.15);
+      case 'ANXIOUS':
+        return Colors.orange.withOpacity(0.15);
+      case 'REFLECTIVE':
+        return AppTheme.accentLavender.withOpacity(0.15);
+      case 'INSPIRED':
+        return Colors.amber.withOpacity(0.15);
+      case 'TIRED':
+        return Colors.blueGrey.withOpacity(0.15);
+      default:
+        return Colors.grey.withOpacity(0.15);
     }
   }
 
   Color _getTagTextColor(String tag) {
     switch (tag.toUpperCase()) {
-      case 'CALM': return const Color(0xFF00E5FF);
-      case 'GRATEFUL': return Colors.green;
-      case 'ANXIOUS': return Colors.orange;
-      case 'REFLECTIVE': return Colors.purple;
-      case 'INSPIRED': return Colors.amber;
-      case 'TIRED': return Colors.blueGrey;
-      default: return Colors.grey;
+      case 'CALM':
+        return AppTheme.primary;
+      case 'GRATEFUL':
+        return AppTheme.accentGreen;
+      case 'ANXIOUS':
+        return Colors.orange;
+      case 'REFLECTIVE':
+        return AppTheme.accentLavender;
+      case 'INSPIRED':
+        return Colors.amber;
+      case 'TIRED':
+        return Colors.blueGrey;
+      default:
+        return Colors.grey;
     }
   }
 
@@ -54,7 +76,7 @@ class _JournalScreenState extends State<JournalScreen> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: const ColorScheme.dark(
-              primary: Color(0xFF00E5FF),
+              primary: AppTheme.primary,
               onPrimary: Colors.black,
               surface: Color(0xFF1E212B),
               onSurface: Colors.white,
@@ -78,7 +100,9 @@ class _JournalScreenState extends State<JournalScreen> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const CreateJournalScreen()),
+            MaterialPageRoute(
+              builder: (context) => const CreateJournalScreen(),
+            ),
           );
         },
         backgroundColor: AppTheme.primary,
@@ -98,12 +122,12 @@ class _JournalScreenState extends State<JournalScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'LUMORA',
-                        style: GoogleFonts.playfairDisplay(
-                          fontSize: 28,
+                        'My Reflections',
+                        style: GoogleFonts.outfit(
+                          fontSize: 26,
                           fontWeight: FontWeight.w800,
-                          color: const Color(0xFF161A23),
-                          letterSpacing: 6.0,
+                          color: AppTheme.textDark,
+                          letterSpacing: -0.5,
                         ),
                       ),
                       PopupMenuButton<String>(
@@ -119,10 +143,14 @@ class _JournalScreenState extends State<JournalScreen> {
                             value: 'signout',
                             child: Row(
                               children: [
-                                const Icon(Icons.logout, color: Color(0xFF00E5FF), size: 20),
+                                const Icon(
+                                  Icons.logout,
+                                  color: AppTheme.primary,
+                                  size: 20,
+                                ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  'Sign Out', 
+                                  'Sign Out',
                                   style: GoogleFonts.dmSans(
                                     fontWeight: FontWeight.w600,
                                     color: Colors.white,
@@ -134,34 +162,18 @@ class _JournalScreenState extends State<JournalScreen> {
                         ],
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(color: Colors.white.withOpacity(0.1)),
+                          side: BorderSide(
+                            color: Colors.white.withOpacity(0.1),
+                          ),
                         ),
                         offset: const Offset(0, 45),
-                        child: const CircleAvatar(
-                          radius: 20,
-                          backgroundColor: Color(0xFFE2E8F0),
-                          child: Icon(Icons.person, color: Color(0xFF64748B)),
+                        child: const Icon(
+                          Icons.person,
+                          color: AppTheme.textDark,
+                          size: 24,
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'My Reflections',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 30,
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFF161A23),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Your private sanctuary for thoughts,\ngrowth, and moments of clarity.',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 14,
-                      color: AppTheme.textMedium,
-                      height: 1.4,
-                    ),
                   ),
                   const SizedBox(height: 20),
 
@@ -169,30 +181,46 @@ class _JournalScreenState extends State<JournalScreen> {
                   GestureDetector(
                     onTap: _pickDate,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1E212B),
+                        color: const Color(0xFFECEAE6),
                         borderRadius: BorderRadius.circular(30),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.calendar_today_rounded, color: Color(0xFF00E5FF), size: 18),
+                          const Icon(
+                            Icons.calendar_today_rounded,
+                            color: AppTheme.textDark,
+                            size: 18,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               _selectedDate != null
-                                  ? DateFormat('MMMM dd, yyyy').format(_selectedDate!)
+                                  ? DateFormat(
+                                      'MMMM dd, yyyy',
+                                    ).format(_selectedDate!)
                                   : 'Filter by date...',
                               style: GoogleFonts.dmSans(
                                 fontSize: 14,
-                                color: _selectedDate != null ? Colors.white : Colors.white54,
+                                color: _selectedDate != null
+                                    ? AppTheme.textDark
+                                    : AppTheme.textMedium,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
                           if (_selectedDate != null)
                             GestureDetector(
                               onTap: () => setState(() => _selectedDate = null),
-                              child: const Icon(Icons.close, color: Colors.white54, size: 18),
+                              child: const Icon(
+                                Icons.close,
+                                color: AppTheme.textMedium,
+                                size: 18,
+                              ),
                             ),
                         ],
                       ),
@@ -214,17 +242,24 @@ class _JournalScreenState extends State<JournalScreen> {
                           onTap: () => setState(() => _selectedTag = tag),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
                             decoration: BoxDecoration(
-                              color: isSelected ? const Color(0xFF00E5FF) : const Color(0xFF2A2E3B),
+                              color: isSelected
+                                  ? AppTheme.textDark
+                                  : const Color(0xFFECEAE6),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
                               tag,
                               style: GoogleFonts.dmSans(
-                                fontSize: 12,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w700,
-                                color: isSelected ? Colors.black : Colors.white60,
+                                color: isSelected
+                                    ? Colors.white
+                                    : AppTheme.textMedium,
                               ),
                             ),
                           ),
@@ -243,7 +278,9 @@ class _JournalScreenState extends State<JournalScreen> {
                 stream: FirestoreService().getJournalEntries(),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator(color: AppTheme.primary));
+                    return const Center(
+                      child: CircularProgressIndicator(color: AppTheme.primary),
+                    );
                   }
 
                   if (snapshot.hasError) {
@@ -260,7 +297,7 @@ class _JournalScreenState extends State<JournalScreen> {
                   }
 
                   final docs = snapshot.data?.docs ?? [];
-                  
+
                   // Filter by date and category
                   final filteredDocs = docs.where((doc) {
                     final data = doc.data() as Map<String, dynamic>;
@@ -275,7 +312,8 @@ class _JournalScreenState extends State<JournalScreen> {
                     if (_selectedDate != null) {
                       final dateStr = data['date'] as String?;
                       if (dateStr != null) {
-                        final selectedStr = '${_selectedDate!.year}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}';
+                        final selectedStr =
+                            '${_selectedDate!.year}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}';
                         if (dateStr != selectedStr) return false;
                       } else {
                         // Fallback to timestamp comparison for older entries
@@ -284,7 +322,8 @@ class _JournalScreenState extends State<JournalScreen> {
                           final entryDate = timestamp.toDate();
                           if (entryDate.year != _selectedDate!.year ||
                               entryDate.month != _selectedDate!.month ||
-                              entryDate.day != _selectedDate!.day) return false;
+                              entryDate.day != _selectedDate!.day)
+                            return false;
                         }
                       }
                     }
@@ -292,20 +331,27 @@ class _JournalScreenState extends State<JournalScreen> {
                     return true;
                   }).toList();
 
-                  final hasActiveFilter = _selectedDate != null || _selectedTag != 'All';
+                  final hasActiveFilter =
+                      _selectedDate != null || _selectedTag != 'All';
 
                   if (filteredDocs.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.edit_note, size: 64, color: AppTheme.textLight.withOpacity(0.5)),
+                          Icon(
+                            Icons.edit_note,
+                            size: 64,
+                            color: AppTheme.textLight.withOpacity(0.5),
+                          ),
                           const SizedBox(height: 16),
                           Text(
                             hasActiveFilter
                                 ? 'No entries match your filters.'
                                 : 'No entries yet. Start writing!',
-                            style: GoogleFonts.dmSans(color: AppTheme.textLight),
+                            style: GoogleFonts.dmSans(
+                              color: AppTheme.textLight,
+                            ),
                           ),
                           if (hasActiveFilter) ...[
                             const SizedBox(height: 12),
@@ -339,7 +385,7 @@ class _JournalScreenState extends State<JournalScreen> {
                       final doc = filteredDocs[index];
                       final data = doc.data() as Map<String, dynamic>;
                       final timestamp = data['createdAt'] as Timestamp?;
-                      final dateStr = timestamp != null 
+                      final dateStr = timestamp != null
                           ? DateFormat('MMM dd').format(timestamp.toDate())
                           : 'Recent';
                       final timeStr = timestamp != null
@@ -438,7 +484,10 @@ class _JournalCard extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: tagColor,
                     borderRadius: BorderRadius.circular(20),
@@ -479,11 +528,18 @@ class _JournalCard extends StatelessWidget {
             const SizedBox(height: 16),
             Row(
               children: [
-                Icon(Icons.access_time, size: 14, color: Colors.white.withOpacity(0.4)),
+                Icon(
+                  Icons.access_time,
+                  size: 14,
+                  color: Colors.white.withOpacity(0.4),
+                ),
                 const SizedBox(width: 4),
                 Text(
                   time,
-                  style: GoogleFonts.dmSans(fontSize: 12, color: Colors.white.withOpacity(0.4)),
+                  style: GoogleFonts.dmSans(
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.4),
+                  ),
                 ),
               ],
             ),
@@ -535,13 +591,28 @@ class JournalDetailScreen extends StatelessWidget {
                 context: context,
                 builder: (context) => AlertDialog(
                   backgroundColor: const Color(0xFF1E212B),
-                  title: const Text('Delete Entry?', style: TextStyle(color: Colors.white)),
-                  content: Text('This action cannot be undone.', style: TextStyle(color: Colors.white.withOpacity(0.7))),
+                  title: const Text(
+                    'Delete Entry?',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  content: Text(
+                    'This action cannot be undone.',
+                    style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                  ),
                   actions: [
-                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL', style: TextStyle(color: Colors.grey))),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text(
+                        'CANCEL',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
                     TextButton(
                       onPressed: () => Navigator.pop(context, true),
-                      child: const Text('DELETE', style: TextStyle(color: Colors.redAccent)),
+                      child: const Text(
+                        'DELETE',
+                        style: TextStyle(color: Colors.redAccent),
+                      ),
                     ),
                   ],
                 ),
@@ -564,7 +635,10 @@ class JournalDetailScreen extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: tagColor,
                     borderRadius: BorderRadius.circular(20),
@@ -603,11 +677,18 @@ class JournalDetailScreen extends StatelessWidget {
             const SizedBox(height: 16),
             Row(
               children: [
-                const Icon(Icons.access_time, size: 16, color: AppTheme.textLight),
+                const Icon(
+                  Icons.access_time,
+                  size: 16,
+                  color: AppTheme.textLight,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   time,
-                  style: GoogleFonts.dmSans(fontSize: 14, color: AppTheme.textLight),
+                  style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    color: AppTheme.textLight,
+                  ),
                 ),
               ],
             ),

@@ -38,22 +38,12 @@ class _SignupScreenState extends State<SignupScreen> {
         );
         // Just pop the signup screen to return to the Login screen
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Account created! Please log in.'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          AppTheme.showCustomSnackBar(context, 'Account created! Please log in.', isSuccess: true);
           Navigator.of(context).pop();
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(e.toString()),
-              backgroundColor: Colors.red[400],
-            ),
-          );
+          AppTheme.showCustomSnackBar(context, e.toString(), isError: true);
         }
       } finally {
         if (mounted) setState(() => _isLoading = false);
@@ -90,212 +80,242 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Logo and App Name
-                Row(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFF6F5F2),
+              Color(0xFFE8F9FA), // Subtle cyan tint
+              Color(0xFFF6F5F2),
+            ],
+            stops: [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const Icon(Icons.spa, color: Color(0xFF00E5FF), size: 28),
-                    const SizedBox(width: 8),
+                    // App Name
                     Text(
                       'LUMORA',
                       style: GoogleFonts.playfairDisplay(
-                        fontSize: 20,
+                        fontSize: 32,
                         fontWeight: FontWeight.w800,
                         color: AppTheme.textDark,
-                        letterSpacing: 4.0,
+                        letterSpacing: 8.0,
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 48),
+                    const SizedBox(height: 48),
 
-                // Headings
-                Text(
-                  'Create your account',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.textDark,
-                    height: 1.1,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Join 10,000+ others finding their daily balance.',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 15,
-                    color: AppTheme.textMedium,
-                  ),
-                ),
-                const SizedBox(height: 40),
-
-                // Form Fields
-                _buildInputLabel('Full Name'),
-                _buildTextField(
-                  controller: _nameController,
-                  hintText: 'Eleanor Shellstrop',
-                  icon: Icons.person_outline,
-                  validator: (value) =>
-                      value == null || value.isEmpty ? 'Please enter your name' : null,
-                ),
-                const SizedBox(height: 24),
-
-                _buildInputLabel('Email Address'),
-                _buildTextField(
-                  controller: _emailController,
-                  hintText: 'name@example.com',
-                  icon: Icons.email_outlined,
-                  keyboardType: TextInputType.emailAddress,
-                  validator: _validateEmail,
-                ),
-                const SizedBox(height: 24),
-
-                _buildInputLabel('Password'),
-                _buildTextField(
-                  controller: _passwordController,
-                  hintText: '••••••••••••',
-                  icon: Icons.lock_outline,
-                  obscureText: _obscurePassword,
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                      color: AppTheme.textMedium,
-                      size: 20,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
-                  validator: _validatePassword,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Must be at least 8 characters with a symbol.',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 12,
-                    color: AppTheme.textLight,
-                  ),
-                ),
-                const SizedBox(height: 32),
-
-                // Privacy Notice Card
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.cardGrey.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.security, color: Color(0xFF00E5FF), size: 20),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Your privacy is our priority. Your data is encrypted and never shared. By joining, you agree to our supportive community guidelines.',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 13,
-                            color: AppTheme.textMedium,
-                            height: 1.4,
+                    // Elegant Card for Form
+                    Container(
+                      padding: const EdgeInsets.all(32),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(32),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.textDark.withOpacity(0.04),
+                            blurRadius: 24,
+                            spreadRadius: 0,
+                            offset: const Offset(0, 12),
                           ),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 40),
-
-                // Create Account Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _handleSignup,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00E5FF),
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(28),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: _isLoading 
-                      ? const SizedBox(
-                          height: 24,
-                          width: 24,
-                          child: CircularProgressIndicator(
-                            color: Colors.black,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              'Create Account',
-                              style: GoogleFonts.dmSans(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.arrow_forward, size: 20),
-                          ],
-                        ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Login Link
-                Center(
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.of(context).pop();
-                    },
-                    child: RichText(
-                      text: TextSpan(
-                        text: 'Already have an account? ',
-                        style: GoogleFonts.dmSans(
-                          fontSize: 14,
-                          color: AppTheme.textMedium,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          TextSpan(
-                            text: 'Log in',
+                          Text(
+                            'Create your account',
                             style: GoogleFonts.dmSans(
-                              fontSize: 14,
-                              color: const Color(0xFF00E5FF),
-                              fontWeight: FontWeight.w600,
-                              decoration: TextDecoration.underline,
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.textDark,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Join 10,000+ others finding their daily balance.',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 15,
+                              color: AppTheme.textMedium,
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+
+                          // Form Fields
+                          _buildInputLabel('Full Name'),
+                          _buildTextField(
+                            controller: _nameController,
+                            hintText: 'Eleanor Shellstrop',
+                            icon: Icons.person_outline,
+                            validator: (value) =>
+                                value == null || value.isEmpty ? 'Please enter your name' : null,
+                          ),
+                          const SizedBox(height: 24),
+
+                          _buildInputLabel('Email Address'),
+                          _buildTextField(
+                            controller: _emailController,
+                            hintText: 'name@example.com',
+                            icon: Icons.email_outlined,
+                            keyboardType: TextInputType.emailAddress,
+                            validator: _validateEmail,
+                          ),
+                          const SizedBox(height: 24),
+
+                          _buildInputLabel('Password'),
+                          _buildTextField(
+                            controller: _passwordController,
+                            hintText: '••••••••••••',
+                            icon: Icons.lock_outline,
+                            obscureText: _obscurePassword,
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                                color: AppTheme.textMedium,
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePassword = !_obscurePassword;
+                                });
+                              },
+                            ),
+                            validator: _validatePassword,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Must be at least 8 characters with a symbol.',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 12,
+                              color: AppTheme.textLight,
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+
+                          // Privacy Notice Card
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8F9FA),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.security, color: Color(0xFF00E5FF), size: 20),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    'Your privacy is our priority. Your data is encrypted and never shared. By joining, you agree to our supportive community guidelines.',
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 13,
+                                      color: AppTheme.textMedium,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 40),
+
+                          // Create Account Button
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: ElevatedButton(
+                              onPressed: _handleSignup,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF00E5FF),
+                                foregroundColor: Colors.black,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(28),
+                                ),
+                              ),
+                              child: _isLoading 
+                                ? const SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.black,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        'Create Account',
+                                        style: GoogleFonts.dmSans(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.arrow_forward, size: 20),
+                                    ],
+                                  ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 48),
+                    const SizedBox(height: 32),
 
-                // Footer Links
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildFooterLink('PRIVACY POLICY'),
-                    _buildFooterLink('TERMS OF SERVICE'),
-                    _buildFooterLink('SUPPORT'),
+                    // Login Link
+                    Center(
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.of(context).pop();
+                        },
+                        child: RichText(
+                          text: TextSpan(
+                            text: 'Already have an account? ',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 15,
+                              color: AppTheme.textMedium,
+                            ),
+                            children: [
+                              TextSpan(
+                                text: 'Log in',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 15,
+                                  color: AppTheme.textDark,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 48),
+
+                    // Footer Links
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _buildFooterLink('PRIVACY POLICY'),
+                        _buildFooterLink('TERMS OF SERVICE'),
+                        _buildFooterLink('SUPPORT'),
+                      ],
+                    ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -347,8 +367,8 @@ class _SignupScreenState extends State<SignupScreen> {
           borderSide: BorderSide.none,
         ),
         filled: true,
-        fillColor: const Color(0xFFF7F5F0), // Changed from container to inner fill
-        contentPadding: const EdgeInsets.symmetric(vertical: 16.0),
+        fillColor: const Color(0xFFF8F9FA), // Softer, cooler off-white for contrast inside the white card
+        contentPadding: const EdgeInsets.symmetric(vertical: 18.0),
         errorStyle: GoogleFonts.dmSans(
           color: Colors.red[400],
         ),
@@ -361,8 +381,8 @@ class _SignupScreenState extends State<SignupScreen> {
       text,
       style: GoogleFonts.dmSans(
         fontSize: 11,
-        color: AppTheme.textLight,
-        fontWeight: FontWeight.w600,
+        color: AppTheme.textMedium,
+        fontWeight: FontWeight.w700,
         letterSpacing: 0.5,
       ),
     );
