@@ -30,29 +30,14 @@ class _RoutineScreenState extends State<RoutineScreen> {
     'Frustrating', 'Tiring', 'Sad'
   ];
 
-  // Step 2 Data
-  double _sleepHours = 7.0;
-  int _sleepQuality = 1; // 0 = Poor, 1 = Fair, 2 = Excellent
   bool _isSaving = false;
 
   void _nextPage() {
-    if (_currentPage == 0) {
-      if (_selectedFeeling == null) {
-        AppTheme.showCustomSnackBar(context, 'Please select how you are feeling.');
-        return;
-      }
-      if (widget.routineType != RoutineType.morning) {
-        // Afternoon/Night routines only have 1 page
-        _saveRoutine();
-      } else {
-        _pageController.nextPage(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
-      }
-    } else {
-      _saveRoutine();
+    if (_selectedFeeling == null) {
+      AppTheme.showCustomSnackBar(context, 'Please select how you are feeling.');
+      return;
     }
+    _saveRoutine();
   }
 
   Future<void> _saveRoutine() async {
@@ -71,69 +56,6 @@ class _RoutineScreenState extends State<RoutineScreen> {
     await prefs.setInt('latest_mood', moodScore);
     await prefs.setInt('latest_energy', moodScore); 
 
-    // Save Sleep (only for morning)
-    if (widget.routineType == RoutineType.morning) {
-      final String historyJson = prefs.getString('sleep_history_v2') ?? '[]';
-      List<Map<String, dynamic>> history = [];
-      try {
-        history = List<Map<String, dynamic>>.from(json.decode(historyJson));
-      } catch (_) {}
-      
-      final todayWeekday = DateTime.now().weekday;
-      final dayLabel = ['M', 'T', 'W', 'T', 'F', 'S', 'S'][todayWeekday - 1];
-      
-      int calculatedQuality = 1;
-      if (_sleepHours < 6) {
-        calculatedQuality = 0; // Poor
-      } else if (_sleepHours >= 6 && _sleepHours <= 8) {
-        calculatedQuality = 2; // Excellent (changed from Fair to fit logic better, wait actually let's stick to simple logic: <5 poor, 5-7 fair, >7 excellent)
-      } else {
-        calculatedQuality = 2; 
-      }
-      // Wait let's do: < 5 -> 0, 5 to 7.5 -> 1, > 7.5 -> 2.
-      if (_sleepHours < 5.0) {
-        calculatedQuality = 0;
-      } else if (_sleepHours >= 5.0 && _sleepHours < 7.5) {
-        calculatedQuality = 1;
-      } else {
-        calculatedQuality = 2;
-      }
-
-      final newEntry = {
-        'day': dayLabel,
-        'hours': _sleepHours,
-        'quality': calculatedQuality,
-        'timestamp': DateTime.now().toIso8601String(),
-      };
-
-      // Check if entry for today exists and replace it, otherwise append
-      int existingIndex = history.indexWhere((log) => DateTime.parse(log['timestamp']).weekday == todayWeekday);
-      if (existingIndex != -1) {
-        history[existingIndex] = newEntry;
-      } else {
-        history.add(newEntry);
-        if (history.length > 7) history.removeAt(0);
-      }
-      
-      await prefs.setString('sleep_history_v2', json.encode(history));
-      
-      String qualityStr = calculatedQuality == 0 ? "Poor" : (calculatedQuality == 1 ? "Fair" : "Excellent");
-      final sleepText = "User slept for ${_sleepHours.toStringAsFixed(1)} hours with $qualityStr quality on ${DateTime.now().toIso8601String()}. Mood today was $_selectedFeeling.";
-      await prefs.setString('latest_sleep_data', sleepText);
-      await prefs.setDouble('latest_sleep_hours', _sleepHours);
-      await prefs.setString('latest_sleep_quality', qualityStr);
-
-      try {
-        final model = GenerativeModel(
-          model: 'gemini-embedding-001',
-          apiKey: dotenv.env['GEMINI_API_KEY'] ?? '',
-        );
-        final response = await model.embedContent(Content.text(sleepText));
-        VectorEngineBridge.insertVector(DateTime.now().millisecondsSinceEpoch % 2147483647, response.embedding.values);
-      } catch (e) {
-        debugPrint("Failed to save embedding: $e");
-      }
-    }
 
     if (mounted) {
       Navigator.pop(context, true); 
@@ -158,7 +80,6 @@ class _RoutineScreenState extends State<RoutineScreen> {
       moodQuestion = 'How was your day?';
     }
 
-    final isMorning = widget.routineType == RoutineType.morning;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -208,7 +129,7 @@ class _RoutineScreenState extends State<RoutineScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    isMorning ? '$themeTitle Check-in 1/2' : '$themeTitle Check-in',
+                                    '$themeTitle Check-in',
                                     style: GoogleFonts.dmSans(color: const Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 13),
                                   ),
                                   const SizedBox(height: 4),
@@ -251,64 +172,6 @@ class _RoutineScreenState extends State<RoutineScreen> {
                     ),
                   ),
 
-                  // PAGE 2: SLEEP
-                  if (isMorning)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF252A36),
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.bedtime_rounded, color: Color(0xFF00E5FF), size: 36),
-                                const SizedBox(width: 16),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '$themeTitle Check-in 2/2',
-                                      style: GoogleFonts.dmSans(color: const Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 13),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'How did you sleep?',
-                                      style: GoogleFonts.dmSans(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 18),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 32),
-                          Text(
-                            'Hours Slept: ${_sleepHours.toStringAsFixed(1)} hrs',
-                            style: GoogleFonts.dmSans(color: Color(0xFF161A23), fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 8),
-                          SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 6,
-                              activeTrackColor: const Color(0xFF00E5FF),
-                              inactiveTrackColor: Colors.black.withOpacity(0.1),
-                              thumbColor: const Color(0xFF161A23),
-                            ),
-                            child: Slider(
-                              value: _sleepHours,
-                              min: 0,
-                              max: 12,
-                              divisions: 24,
-                              onChanged: (val) => setState(() => _sleepHours = val),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -337,7 +200,7 @@ class _RoutineScreenState extends State<RoutineScreen> {
                     child: _isSaving
                         ? const Center(child: CircularProgressIndicator(color: Colors.black))
                         : Icon(
-                            (_currentPage == 0 && isMorning) ? Icons.arrow_forward_ios_rounded : Icons.check_rounded,
+                            Icons.check_rounded,
                             color: Colors.black,
                             size: 24,
                           ),

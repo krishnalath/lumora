@@ -12,6 +12,9 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'dart:io';
 import 'package:flutter_animate/flutter_animate.dart';
+import '../services/sleep_storage_service.dart';
+import '../services/youtube_service.dart';
+import '../widgets/video_suggestion_card.dart';
 
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key, this.onLiveStatusChanged});
@@ -223,18 +226,15 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
       // 4. Construct System Context with C++ DB Results + Health Tracking Data
       final prefs = await SharedPreferences.getInstance();
-      final latestSleepData =
-          prefs.getString('latest_sleep_data') ??
-          'No recent sleep log available.';
 
-      // --- Health context injection ---
-      // Read latest Mood, Energy, Sleep from SharedPreferences
+      // Read latest Mood, Energy from SharedPreferences (logged from Routine)
       final int currentMood = prefs.getInt('latest_mood') ?? -1;
       final int currentEnergy = prefs.getInt('latest_energy') ?? -1;
-      final double currentSleepHours =
-          prefs.getDouble('latest_sleep_hours') ?? -1.0;
-      final String currentSleepQuality =
-          prefs.getString('latest_sleep_quality') ?? '';
+      
+      // Read accurate sleep log from the modern SleepStorageService
+      final todaySleep = await SleepStorageService.getTodaySleep();
+      final double currentSleepHours = todaySleep != null ? todaySleep.duration.inMinutes / 60.0 : -1.0;
+      final String currentSleepQuality = todaySleep != null ? '${todaySleep.durationFormatted}' : '';
 
       // Determine whether health values have changed since last injection
       final bool healthChanged =
@@ -248,16 +248,13 @@ class _AiChatScreenState extends State<AiChatScreen> {
       if (!_contextInjectedThisSession || healthChanged) {
         if (currentMood >= 0 || currentEnergy >= 0 || currentSleepHours >= 0) {
           final moodStr = currentMood >= 0 ? '${currentMood}/10' : 'unknown';
-          final energyStr = currentEnergy >= 0
-              ? '${currentEnergy}/10'
-              : 'unknown';
+          final energyStr = currentEnergy >= 0 ? '${currentEnergy}/10' : 'unknown';
           final sleepStr = currentSleepHours >= 0
-              ? '${currentSleepHours.toStringAsFixed(1)}hrs'
-                    '${currentSleepQuality.isNotEmpty ? ' ($currentSleepQuality)' : ''}'
-              : 'unknown';
+              ? '${currentSleepHours.toStringAsFixed(1)} hrs'
+              : 'Not logged today';
 
           healthContextPrefix =
-              '[Context: Mood $moodStr, Energy $energyStr, Sleep $sleepStr]\n\n';
+              '[Health Context: Mood $moodStr, Energy $energyStr, Sleep $sleepStr]\n\n';
 
           // Remember what we injected
           _lastMood = currentMood;
@@ -268,17 +265,26 @@ class _AiChatScreenState extends State<AiChatScreen> {
         }
       }
 
-      String contextString = 'System Context:\n';
-      contextString += '- Recent Sleep Data: $latestSleepData\n';
+      String contextString = 'Local DB Search Results:\n';
       for (var result in searchResults) {
         contextString +=
-            '- Local DB Context [ID: ${result['id']}]: Found relevant data with distance ${result['distance'].toStringAsFixed(4)}\n';
+            '- Context [ID: ${result['id']}]: Found relevant memory with distance ${result['distance'].toStringAsFixed(4)}\n';
       }
 
       final String fullPrompt =
           '''
-You are Luna, a helpful privacy-first mental health companion app.
-Use the following local context from the user's C++ database if it's relevant to their query.
+You are Luna, a helpful privacy-first mental health companion within the Lumora app. 
+
+Lumora App Features you should refer to when helping the user:
+- Sleep Insights: Users can manually log their bedtime and wake-up times to track their sleep patterns, calculate 7-day averages, and get weekly summaries.
+- Journal: Users can write daily journals, tag them, and save them for self-reflection.
+- Routines: Users can log Morning, Afternoon, and Night routines (which ask about their mood, energy, and daily activities).
+- Care Hub: A safe space for users to find professional help, access emergency hotlines, and utilize coping tools.
+- My Tasks: A place to manage daily to-do lists and goals.
+
+If the user describes a problem with a clear physical or technical solution (e.g., yoga for back pain, breathing for anxiety, meditation for sleep), include a special tag in your response exactly like [VIDEO_SEARCH: search_term]. Luna can automatically show a YouTube video to the user when this tag is present. Only use ONE tag per response.
+
+Use the following local context from the user's C++ database (which contains past journal entries, sleep logs, or routines) if it's relevant to their query. If no DB context is provided or relevant, just chat naturally based on your capabilities.
 
 $contextString
 
@@ -288,9 +294,17 @@ ${healthContextPrefix}User Question: $text
       // 5. Generate: Send prompt + local context to Gemini Flash
       final chatContent = [Content.text(fullPrompt)];
       final response = await _model.generateContent(chatContent);
-      final String reply =
-          response.text ?? "Sorry, I couldn't generate a response.";
+      String reply = response.text ?? "Sorry, I couldn't generate a response.";
       widget.onLiveStatusChanged?.call(true);
+
+      // Check for video tag
+      final videoTagRegex = RegExp(r'\[VIDEO_SEARCH:\s*(.*?)\]');
+      final match = videoTagRegex.firstMatch(reply);
+      String? videoSearchTerm;
+      if (match != null) {
+        videoSearchTerm = match.group(1);
+        reply = reply.replaceAll(match.group(0)!, '').trim();
+      }
 
       // 6. Update UI with Bot's response
       if (mounted) {
@@ -298,11 +312,35 @@ ${healthContextPrefix}User Question: $text
           _isLoading = false;
           _messages.add({
             'isBot': true,
-            'text': reply.trim(),
+            'text': reply,
             'time':
                 '${TimeOfDay.now().hour}:${TimeOfDay.now().minute.toString().padLeft(2, '0')} AM',
+            if (videoSearchTerm != null) 'videoSearchTerm': videoSearchTerm,
+            if (videoSearchTerm != null) 'isLoadingVideo': true,
           });
         });
+        
+        final msgIndex = _messages.length - 1;
+        
+        if (videoSearchTerm != null) {
+          YouTubeService.searchBestVideo(videoSearchTerm).then((videoData) {
+            if (mounted) {
+              setState(() {
+                _messages[msgIndex]['isLoadingVideo'] = false;
+                if (videoData != null) {
+                  _messages[msgIndex]['videoData'] = {
+                    'id': videoData.id,
+                    'title': videoData.title,
+                    'thumbnailUrl': videoData.thumbnailUrl,
+                    'author': videoData.author,
+                    'durationInSeconds': videoData.duration.inSeconds,
+                  };
+                }
+              });
+              // We do not save videoData to DB right now to keep Conversation model simple
+            }
+          });
+        }
 
         Future.delayed(const Duration(milliseconds: 100), () {
           if (_scrollController.hasClients) {
@@ -1724,51 +1762,82 @@ class _ChatBubble extends StatelessWidget {
                             ],
                           ],
                         )
-                      : isBot
-                      ? MarkdownBody(
-                          data: message['text'] as String,
-                          styleSheet: MarkdownStyleSheet(
-                            p: GoogleFonts.dmSans(
-                              fontSize: 14,
-                              color: Colors.white,
-                              height: 1.5,
-                            ),
-                            strong: GoogleFonts.dmSans(
-                              fontSize: 14,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              height: 1.5,
-                            ),
-                            em: GoogleFonts.dmSans(
-                              fontSize: 14,
-                              color: Colors.white70,
-                              fontStyle: FontStyle.italic,
-                              height: 1.5,
-                            ),
-                            listBullet: GoogleFonts.dmSans(
-                              fontSize: 14,
-                              color: Colors.white,
-                            ),
-                            blockquote: GoogleFonts.dmSans(
-                              fontSize: 13,
-                              color: Colors.white70,
-                              fontStyle: FontStyle.italic,
-                            ),
-                            code: GoogleFonts.dmMono(
-                              fontSize: 13,
-                              color: const Color(0xFF00E5FF),
-                              backgroundColor: const Color(0xFF2A2E3B),
-                            ),
-                          ),
-                          shrinkWrap: true,
-                        )
-                      : Text(
-                          message['text'] as String,
-                          style: GoogleFonts.dmSans(
-                            fontSize: 14,
-                            color: Colors.black,
-                            height: 1.5,
-                          ),
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            isBot
+                                ? MarkdownBody(
+                                    data: message['text'] as String,
+                                    styleSheet: MarkdownStyleSheet(
+                                      p: GoogleFonts.dmSans(
+                                        fontSize: 14,
+                                        color: Colors.white,
+                                        height: 1.5,
+                                      ),
+                                      strong: GoogleFonts.dmSans(
+                                        fontSize: 14,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        height: 1.5,
+                                      ),
+                                      em: GoogleFonts.dmSans(
+                                        fontSize: 14,
+                                        color: Colors.white70,
+                                        fontStyle: FontStyle.italic,
+                                        height: 1.5,
+                                      ),
+                                      listBullet: GoogleFonts.dmSans(
+                                        fontSize: 14,
+                                        color: Colors.white,
+                                      ),
+                                      blockquote: GoogleFonts.dmSans(
+                                        fontSize: 13,
+                                        color: Colors.white70,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                      code: GoogleFonts.dmMono(
+                                        fontSize: 13,
+                                        color: const Color(0xFF00E5FF),
+                                        backgroundColor: const Color(0xFF2A2E3B),
+                                      ),
+                                    ),
+                                    shrinkWrap: true,
+                                  )
+                                : Text(
+                                    message['text'] as String,
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 14,
+                                      color: Colors.black,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                            if (message['isLoadingVideo'] == true)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Row(
+                                  children: [
+                                    const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text('Finding video...', style: GoogleFonts.dmSans(color: Colors.white70, fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                            if (message['videoData'] != null)
+                              VideoSuggestionCard(
+                                video: YouTubeVideoData(
+                                  id: message['videoData']['id'],
+                                  title: message['videoData']['title'],
+                                  thumbnailUrl: message['videoData']['thumbnailUrl'],
+                                  author: message['videoData']['author'],
+                                  duration: Duration(seconds: message['videoData']['durationInSeconds']),
+                                ),
+                              ),
+                          ],
                         ),
                 ),
               ),
