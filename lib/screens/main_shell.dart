@@ -5,6 +5,7 @@ import 'home_screen.dart';
 import 'journal_screen.dart';
 import 'ai_chat_screen.dart';
 import 'care_hub_screen.dart';
+import '../services/sleep_storage_service.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -27,6 +28,9 @@ class _MainShellState extends State<MainShell> {
       AiChatScreen(onLiveStatusChanged: _handleAiStatus),
       const CareHubScreen(),
     ];
+
+    // Sync sleep data from Firestore on login (non-blocking)
+    SleepStorageService.syncFromFirestore();
   }
 
   void _handleAiStatus(bool isOnline) {

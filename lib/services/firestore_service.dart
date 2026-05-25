@@ -151,5 +151,112 @@ class FirestoreService {
   Future<void> deleteTask(String taskId) async {
     await _db.collection('tasks').doc(taskId).delete();
   }
+
+  // ── Sleep Log Methods ───────────────────────────────────────────
+
+  /// Save or update a single sleep record in Firestore.
+  /// Uses the record's `id` as the document ID for idempotent upserts.
+  Future<void> saveSleepRecord(Map<String, dynamic> recordJson) async {
+    final user = _auth.currentUser;
+    if (user == null) return; // Silently skip if not logged in
+
+    final docId = recordJson['id'] as String;
+    await _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('sleep_records')
+        .doc(docId)
+        .set({
+      ...recordJson,
+      'uid': user.uid,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Fetch all sleep records for the current ISO week.
+  /// Returns them sorted by sleepStart ascending.
+  Future<List<Map<String, dynamic>>> getCurrentWeekSleepRecords({
+    required DateTime weekStart,
+    required DateTime weekEnd,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return [];
+
+    final snapshot = await _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('sleep_records')
+        .where('sleepStart',
+            isGreaterThanOrEqualTo: weekStart.toIso8601String())
+        .where('sleepStart', isLessThan: weekEnd.toIso8601String())
+        .orderBy('sleepStart')
+        .get();
+
+    return snapshot.docs.map((doc) => doc.data()).toList();
+  }
+
+  /// Fetch all sleep records within the last [days] days.
+  Future<List<Map<String, dynamic>>> getSleepHistory({int days = 90}) async {
+    final user = _auth.currentUser;
+    if (user == null) return [];
+
+    final cutoff = DateTime.now().subtract(Duration(days: days));
+    final snapshot = await _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('sleep_records')
+        .where('sleepStart',
+            isGreaterThanOrEqualTo: cutoff.toIso8601String())
+        .orderBy('sleepStart', descending: true)
+        .get();
+
+    return snapshot.docs.map((doc) => doc.data()).toList();
+  }
+
+  /// Delete a specific sleep record by its ID.
+  Future<void> deleteSleepRecord(String recordId) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    await _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('sleep_records')
+        .doc(recordId)
+        .delete();
+  }
+
+  /// Save the weekly average history entry to Firestore.
+  Future<void> saveSleepWeeklyAverage(Map<String, dynamic> avgData) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    final docId = '${avgData['year']}_w${avgData['week']}';
+    await _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('sleep_weekly_averages')
+        .doc(docId)
+        .set({
+      ...avgData,
+      'uid': user.uid,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Fetch all weekly average history entries.
+  Future<List<Map<String, dynamic>>> getSleepWeeklyAverages() async {
+    final user = _auth.currentUser;
+    if (user == null) return [];
+
+    final snapshot = await _db
+        .collection('users')
+        .doc(user.uid)
+        .collection('sleep_weekly_averages')
+        .orderBy('year', descending: true)
+        .get();
+
+    return snapshot.docs.map((doc) => doc.data()).toList();
+  }
 }
 

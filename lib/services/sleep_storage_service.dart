@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sleep_record.dart';
+import 'firestore_service.dart';
 
 /// Persistence layer for sleep records.
 ///
@@ -16,6 +18,8 @@ class SleepStorageService {
   static const String _historyKey = 'sleep_week_history';
   static const String _allRecordsKey = 'sleep_all_records';
   static const String _lastLogDateKey = 'sleep_last_log_date';
+
+  static final FirestoreService _firestore = FirestoreService();
 
   // ── ISO week helpers ─────────────────────────────────────────────
 
@@ -91,24 +95,33 @@ class SleepStorageService {
       // Load existing history
       final historyStr = prefs.getString(_historyKey) ?? '[]';
       final List<dynamic> history = json.decode(historyStr);
-      history.add({
+      final avgEntry = {
         'week': week,
         'year': year,
         'avgHours': avgHours,
         'daysLogged': count,
         'archivedAt': DateTime.now().toIso8601String(),
-      });
+      };
+      history.add(avgEntry);
       // Keep last 52 weeks of history
       if (history.length > 52) {
         history.removeRange(0, history.length - 52);
       }
       await prefs.setString(_historyKey, json.encode(history));
+
+      // Sync weekly average to Firestore
+      try {
+        await _firestore.saveSleepWeeklyAverage(avgEntry);
+      } catch (e) {
+        debugPrint('Firestore sleep weekly avg sync failed: $e');
+      }
     } catch (_) {}
   }
 
   // ── Core CRUD ─────────────────────────────────────────────────
 
   /// Save a sleep record for a specific weekday in the current week.
+  /// Writes to both local SharedPreferences and Firestore.
   static Future<void> saveSleepRecord(SleepRecord record) async {
     await _rotateWeekIfNeeded();
     final prefs = await SharedPreferences.getInstance();
@@ -138,6 +151,13 @@ class SleepStorageService {
       });
       await prefs.setString(_allRecordsKey, json.encode(all));
     } catch (_) {}
+
+    // ── Sync to Firestore (fire-and-forget, won't block UI) ──
+    try {
+      await _firestore.saveSleepRecord(record.toJson());
+    } catch (e) {
+      debugPrint('Firestore sleep record sync failed: $e');
+    }
   }
 
   /// Get the current week's summary: Map<weekday, SleepRecord?> for Mon(1)–Sun(7).
@@ -271,5 +291,58 @@ class SleepStorageService {
     await prefs.remove(_historyKey);
     await prefs.remove(_allRecordsKey);
     await prefs.remove(_lastLogDateKey);
+  }
+
+  // ── Firestore Sync ─────────────────────────────────────────────
+
+  /// Pull sleep records from Firestore into local SharedPreferences.
+  /// Call this on app startup or login to hydrate the local cache
+  /// with cloud data (e.g., when switching devices).
+  static Future<void> syncFromFirestore() async {
+    try {
+      final now = DateTime.now();
+
+      // Calculate current ISO week start (Monday) and end (next Monday)
+      final weekday = now.weekday; // Mon=1 .. Sun=7
+      final weekStart = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: weekday - 1));
+      final weekEnd = weekStart.add(const Duration(days: 7));
+
+      // Fetch current week's records from Firestore
+      final cloudRecords = await _firestore.getCurrentWeekSleepRecords(
+        weekStart: weekStart,
+        weekEnd: weekEnd,
+      );
+
+      if (cloudRecords.isEmpty) return;
+
+      final prefs = await SharedPreferences.getInstance();
+
+      // Rebuild the current week map from cloud data
+      final Map<String, dynamic> weekData = {};
+      for (final recordJson in cloudRecords) {
+        try {
+          final record = SleepRecord.fromJson(recordJson);
+          final wakeDay = record.sleepEnd?.weekday ?? record.sleepStart.weekday;
+          weekData[wakeDay.toString()] = record.toJson();
+        } catch (e) {
+          debugPrint('Skipping malformed cloud sleep record: $e');
+        }
+      }
+
+      // Merge with local: cloud wins for same weekday
+      final localStr = prefs.getString(_currentWeekKey) ?? '{}';
+      final Map<String, dynamic> localData = json.decode(localStr);
+      localData.addAll(weekData); // Cloud overwrites local for same keys
+      await prefs.setString(_currentWeekKey, json.encode(localData));
+
+      // Update week tracking
+      await prefs.setInt(_weekNumberKey, _isoWeekNumber(now));
+      await prefs.setInt(_weekYearKey, _isoWeekYear(now));
+
+      debugPrint('Sleep sync from Firestore complete: ${cloudRecords.length} records merged.');
+    } catch (e) {
+      debugPrint('Firestore sleep sync failed (offline?): $e');
+    }
   }
 }

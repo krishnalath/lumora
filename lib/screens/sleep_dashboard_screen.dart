@@ -19,6 +19,7 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
   double _weeklyAvg = 0.0;
   bool _isLoading = true;
   bool _hasLoggedToday = false;
+  List<Map<String, dynamic>> _history = [];
   late AnimationController _ringController;
   late Animation<double> _ringAnimation;
 
@@ -49,12 +50,14 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
     final weekly = await SleepStorageService.getWeeklySummary();
     final avg = await SleepStorageService.getWeeklyAverageSleep();
     final logged = await SleepStorageService.hasLoggedToday();
+    final history = await SleepStorageService.getWeeklyHistory();
     if (mounted) {
       setState(() {
         _todaySleep = today;
         _weeklySummary = weekly;
         _weeklyAvg = avg;
         _hasLoggedToday = logged;
+        _history = history.reversed.toList(); // Newest first
         _isLoading = false;
       });
       _ringController.forward(from: 0);
@@ -185,6 +188,8 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
                     _buildInsightsCard(),
                     const SizedBox(height: 24),
                     _buildLogButton(),
+                    const SizedBox(height: 32),
+                    _buildHistorySection(),
                     const SizedBox(height: 32),
                   ],
                 ),
@@ -608,6 +613,137 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
           ],
         ),
       ),
+    );
+  }
+
+  // ── History Section ─────────────────────────────────────────────
+  Widget _buildHistorySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Past Insights',
+          style: GoogleFonts.outfit(
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (_history.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E212B),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withOpacity(0.05)),
+            ),
+            child: Column(
+              children: [
+                Icon(
+                  Icons.history_rounded,
+                  color: Colors.white24,
+                  size: 32,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'No past insights yet.',
+                  style: GoogleFonts.outfit(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Keep logging your sleep each week to build your history.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.dmSans(
+                    fontSize: 13,
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ..._history.map((entry) {
+            final double avgHours = entry['avgHours'] as double? ?? 0.0;
+            final int daysLogged = entry['daysLogged'] as int? ?? 0;
+            final int week = entry['week'] as int? ?? 0;
+            final int year = entry['year'] as int? ?? 0;
+            
+            Color avgColor;
+            if (avgHours >= 7 && avgHours <= 9) {
+              avgColor = AppTheme.accentGreen;
+            } else if (avgHours >= 5.5) {
+              avgColor = const Color(0xFFFFC94A);
+            } else {
+              avgColor = const Color(0xFFFF6B6B);
+            }
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E212B),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: avgColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Text(
+                        avgHours.toStringAsFixed(1),
+                        style: GoogleFonts.outfit(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: avgColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Week $week, $year',
+                          style: GoogleFonts.outfit(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$daysLogged days logged',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            color: Colors.white54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.history_rounded,
+                    color: Colors.white24,
+                    size: 20,
+                  ),
+                ],
+              ),
+            );
+          }),
+      ],
     );
   }
 }

@@ -381,6 +381,10 @@ ${healthContextPrefix}User Question: $text
           errorStr.contains('429') ||
           errorStr.contains('quota') ||
           errorStr.contains('too many requests');
+      final bool isServerOverloaded =
+          errorStr.contains('503') ||
+          errorStr.contains('high demand') ||
+          errorStr.contains('unavailable');
 
       if (isAuthError) {
         setState(() => _isLoading = false);
@@ -412,6 +416,40 @@ ${healthContextPrefix}User Question: $text
                 Expanded(
                   child: Text(
                     'Luna needs a breather! 🌙 Your Gemini key may be rate limited or out of quota.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 13,
+                      color: Colors.white,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      } else if (isServerOverloaded) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            backgroundColor: const Color(0xFF1E212B),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Color(0xFFFFB300), width: 1),
+            ),
+            duration: const Duration(seconds: 6),
+            content: Row(
+              children: [
+                const Icon(
+                  Icons.cloud_off_rounded,
+                  color: Color(0xFFFFB300),
+                  size: 22,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Luna is experiencing very high traffic! Please wait a moment and try again.',
                     style: GoogleFonts.dmSans(
                       fontSize: 13,
                       color: Colors.white,
