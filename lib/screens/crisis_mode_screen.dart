@@ -124,7 +124,7 @@ class _CrisisModeScreenState extends State<CrisisModeScreen>
   }
 
   Future<void> _callHelpline() async {
-    final Uri url = Uri.parse('tel:988');
+    final Uri url = Uri.parse('tel:14416');
     if (!await launchUrl(url)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -354,7 +354,7 @@ class _EscalationSliderState extends State<_EscalationSlider> {
           // Label
           Center(
             child: Text(
-              _confirmed ? 'Calling...' : 'Slide to call 988 →',
+              _confirmed ? 'Calling...' : 'Slide to call 14416 →',
               style: GoogleFonts.dmSans(
                 color: Colors.redAccent.withOpacity(0.7),
                 fontWeight: FontWeight.w600,
