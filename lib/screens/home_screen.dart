@@ -8,6 +8,7 @@ import 'routine_screen.dart';
 import 'my_tasks_screen.dart';
 import 'sleep_dashboard_screen.dart';
 import '../services/sleep_storage_service.dart';
+import 'help_support_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -158,9 +159,35 @@ class _HomeScreenState extends State<HomeScreen> {
           color: const Color(0xFF1E212B),
           elevation: 8,
           onSelected: (value) async {
-            if (value == 'signout') await AuthService().signOut();
+            if (value == 'signout') {
+              await AuthService().signOut();
+            } else if (value == 'help') {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const HelpSupportScreen(),
+                ),
+              );
+            }
           },
           itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'help',
+              child: Row(
+                children: [
+                  const Icon(Icons.help_outline, color: AppTheme.primary, size: 20),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Help & Support',
+                    style: GoogleFonts.dmSans(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(height: 1),
             PopupMenuItem(
               value: 'signout',
               child: Row(

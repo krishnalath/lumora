@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
+import 'help_support_screen.dart';
 import '../services/auth_service.dart';
 import 'therapist_chat_screen.dart';
 import 'map_picker_screen.dart';
@@ -1999,25 +2000,13 @@ class _TherapistDashboardScreenState extends State<TherapistDashboardScreen> {
                 color: Colors.white38,
                 size: 14,
               ),
-              onTap: () async {
-                final Uri emailUri = Uri(
-                  scheme: 'mailto',
-                  path: 'support@lumora.care',
-                  queryParameters: {
-                    'subject': 'Support Request - Therapist Portal',
-                  },
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const HelpSupportScreen(),
+                  ),
                 );
-                if (await canLaunchUrl(emailUri)) {
-                  await launchUrl(emailUri);
-                } else {
-                  if (mounted) {
-                    AppTheme.showCustomSnackBar(
-                      context,
-                      'Could not open email client',
-                      isError: true,
-                    );
-                  }
-                }
               },
             ),
           ).animate().fadeIn(delay: 320.ms),

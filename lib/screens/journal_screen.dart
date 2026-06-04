@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
 import '../services/auth_service.dart';
 import 'create_journal_screen.dart';
+import 'help_support_screen.dart';
 
 class JournalScreen extends StatefulWidget {
   const JournalScreen({super.key});
@@ -136,9 +137,37 @@ class _JournalScreenState extends State<JournalScreen> {
                         onSelected: (value) async {
                           if (value == 'signout') {
                             await AuthService().signOut();
+                          } else if (value == 'help') {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const HelpSupportScreen(),
+                              ),
+                            );
                           }
                         },
                         itemBuilder: (context) => [
+                          PopupMenuItem(
+                            value: 'help',
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.help_outline,
+                                  color: AppTheme.primary,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Help & Support',
+                                  style: GoogleFonts.dmSans(
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuDivider(height: 1),
                           PopupMenuItem(
                             value: 'signout',
                             child: Row(

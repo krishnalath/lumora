@@ -10,6 +10,7 @@ import '../services/firestore_service.dart';
 import '../services/care_hub_service.dart';
 import 'crisis_mode_screen.dart';
 import 'professional_chat_screen.dart';
+import 'help_support_screen.dart';
 
 class CareHubScreen extends StatefulWidget {
   const CareHubScreen({super.key});
@@ -254,9 +255,39 @@ class _CareHubScreenState extends State<CareHubScreen> {
                     color: const Color(0xFF1E212B),
                     elevation: 8,
                     onSelected: (value) async {
-                      if (value == 'signout') await AuthService().signOut();
+                      if (value == 'signout') {
+                        await AuthService().signOut();
+                      } else if (value == 'help') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const HelpSupportScreen(),
+                          ),
+                        );
+                      }
                     },
                     itemBuilder: (context) => [
+                      PopupMenuItem(
+                        value: 'help',
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.help_outline,
+                              color: AppTheme.primary,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Help & Support',
+                              style: GoogleFonts.dmSans(
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuDivider(height: 1),
                       PopupMenuItem(
                         value: 'signout',
                         child: Row(
@@ -1441,22 +1472,21 @@ class _CareHubScreenState extends State<CareHubScreen> {
       ),
       isScrollControlled: true,
       builder: (ctx) {
-        return FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance
-              .collection('therapist_profiles')
-              .doc(therapistName)
-              .get(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Padding(
-                padding: EdgeInsets.all(40.0),
-                child: Center(
+        return Container(
+          height: 400,
+          child: FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('therapist_profiles')
+                .doc(therapistName)
+                .get(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
                   child: CircularProgressIndicator(
                     color: AppTheme.accentLavender,
                   ),
-                ),
-              );
-            }
+                );
+              }
 
             final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
             final email = data['email'] as String? ?? 'Contact via CareHub';
@@ -1464,15 +1494,16 @@ class _CareHubScreenState extends State<CareHubScreen> {
                 data['specialty'] as String? ?? 'Verified Therapist';
             final bio = data['bio'] as String? ?? 'No biography available.';
 
-            return Padding(
-              padding: const EdgeInsets.all(
-                24.0,
-              ).copyWith(bottom: MediaQuery.of(context).viewInsets.bottom + 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
+            return SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(
+                  24.0,
+                ).copyWith(bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
                     child: Container(
                       width: 40,
                       height: 4,
@@ -1566,11 +1597,13 @@ class _CareHubScreenState extends State<CareHubScreen> {
                   const SizedBox(height: 24),
                 ],
               ),
+              ),
             );
           },
-        );
-      },
-    );
+        ),
+      );
+    },
+  );
   }
 
   // ── Secure Messaging List ───────────────────────────────────

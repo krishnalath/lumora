@@ -245,16 +245,16 @@ class _CrisisModeScreenState extends State<CrisisModeScreen>
                                   stops: const [0.0, 0.6, 1.0],
                                 ),
                               ),
-                              child: Center(
-                                child: Text(
-                                  _phaseLabel,
-                                  style: GoogleFonts.outfit(
-                                    color: Colors.white,
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 1,
-                                  ),
-                                ),
+                            ),
+                            // Text layer overlaid on top
+                            Text(
+                              _phaseLabel,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.outfit(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 1,
                               ),
                             ),
                           ],
