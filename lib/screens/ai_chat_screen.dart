@@ -257,42 +257,69 @@ class _AiChatScreenState extends State<AiChatScreen> {
       // 2. Construct health context from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       final int currentMood = prefs.getInt('latest_mood') ?? -1;
+      final String? currentMoodStr = prefs.getString('latest_mood_str');
       final int currentEnergy = prefs.getInt('latest_energy') ?? -1;
+      final String? currentEnergyStr = prefs.getString('latest_energy_str');
+      
+      // Read accurate sleep log from the modern SleepStorageService
       final todaySleep = await SleepStorageService.getTodaySleep();
-      final double currentSleepHours = todaySleep != null
-          ? todaySleep.duration.inMinutes / 60.0
-          : -1.0;
-      final String currentSleepQuality = todaySleep != null
-          ? todaySleep.durationFormatted
-          : '';
+      final double currentSleepHours = todaySleep != null ? todaySleep.duration.inMinutes / 60.0 : -1.0;
+      final int currentSleepScore = todaySleep != null ? todaySleep.sleepScore : -1;
+      final String currentSleepQuality = todaySleep != null ? '${todaySleep.durationFormatted}' : '';
 
-      final bool healthChanged =
-          currentMood != _lastMood ||
+      // Determine whether health values have changed since last injection
+      // Only consider it a "change" if we have already injected once this session (_lastMood != null)
+      final bool healthChanged = _lastMood != null &&
+          (currentMood != _lastMood ||
           currentEnergy != _lastEnergy ||
           currentSleepHours != _lastSleepHours ||
-          currentSleepQuality != _lastSleepQuality;
+          currentSleepQuality != _lastSleepQuality);
 
+      final bool isNewConversation = _messages.length <= 1;
+
+      // Build the health context prefix only on first message of a new conversation or when data actually changed
       String healthContextPrefix = '';
-      if (!_contextInjectedThisSession || healthChanged) {
+      if (isNewConversation || healthChanged) {
         if (currentMood >= 0 || currentEnergy >= 0 || currentSleepHours >= 0) {
-          final moodStr = currentMood >= 0 ? '$currentMood/10' : 'unknown';
-          final energyStr = currentEnergy >= 0
-              ? '$currentEnergy/10'
-              : 'unknown';
+          final moodStr = currentMoodStr ?? (currentMood >= 0 ? '${currentMood}/10' : 'unknown');
+          final energyStr = currentEnergyStr ?? (currentEnergy >= 0 ? '${currentEnergy}/10' : 'unknown');
           final sleepStr = currentSleepHours >= 0
-              ? '${currentSleepHours.toStringAsFixed(1)} hrs'
+              ? '${currentSleepHours.toStringAsFixed(1)} hrs (Score: $currentSleepScore/100)'
               : 'Not logged today';
+
           healthContextPrefix =
-              '[Health Context: Mood $moodStr, Energy $energyStr, Sleep $sleepStr]\n\n';
+              '[Health Context: Mood is $moodStr, Energy is $energyStr, Sleep $sleepStr]\n\n';
+
+          // Remember what we injected
           _lastMood = currentMood;
           _lastEnergy = currentEnergy;
           _lastSleepHours = currentSleepHours;
           _lastSleepQuality = currentSleepQuality;
           _contextInjectedThisSession = true;
         }
+      } else if (_lastMood == null) {
+        // Sync state on load so future changes are detected
+        _lastMood = currentMood;
+        _lastEnergy = currentEnergy;
+        _lastSleepHours = currentSleepHours;
+        _lastSleepQuality = currentSleepQuality;
+        _contextInjectedThisSession = true;
       }
 
       // 3. Build full prompt with system context
+      String contextString = 'Local DB Search Results:\n';
+      for (var result in searchResults) {
+        contextString +=
+            '- Context [ID: ${result['id']}]: Found relevant memory with distance ${result['distance'].toStringAsFixed(4)}\n';
+      }
+
+      String historyString = '';
+      for (int i = 0; i < _messages.length - 1; i++) {
+        final msg = _messages[i];
+        final role = msg['isBot'] == true ? 'Luna' : 'User';
+        historyString += '$role: ${msg['text']}\n\n';
+      }
+
       final String fullPrompt =
           '''
 You are Luna, a warm, empathetic, and helpful mental health companion inside the Lumora app.
@@ -306,7 +333,16 @@ Lumora App Features:
 
 If the user describes a problem with a clear physical or technical solution (e.g., yoga for back pain, breathing for anxiety, meditation for sleep), include a special tag in your response exactly like [VIDEO_SEARCH: search_term]. Only use ONE tag per response.
 
-${healthContextPrefix}User: $text
+If the provided Health Context shows a low sleep score (<60) or low energy ("Low" or "Exhausted"), proactively check up on the user's mood and offer supportive advice or ask how they are coping today. Do not ask again if it has already been discussed in the Conversation History.
+
+Use the following local context from the user's C++ database (which contains past journal entries, sleep logs, or routines) if it's relevant to their query. If no DB context is provided or relevant, just chat naturally based on your capabilities.
+
+$contextString
+
+Conversation History:
+$historyString
+
+${healthContextPrefix}User Question: $text
 ''';
 
       // 4. Call Gemini via HTTP (supports both AIzaSy and AQ. key formats)
