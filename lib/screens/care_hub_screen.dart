@@ -31,10 +31,21 @@ class _CareHubScreenState extends State<CareHubScreen> {
   bool _isLoadingRecommendation = true;
   Map<String, String> _aiRecommendation = {};
 
+  late final Stream<QuerySnapshot> _personalSessionsStream;
+  late final Stream<QuerySnapshot> _upcomingSessionsStream;
+
   @override
   void initState() {
     super.initState();
     _loadAIRecommendation();
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    _personalSessionsStream = FirebaseFirestore.instance
+        .collection('care_sessions')
+        .where('uid', isEqualTo: currentUid)
+        .snapshots();
+    _upcomingSessionsStream = FirebaseFirestore.instance
+        .collection('therapist_sessions')
+        .snapshots();
   }
 
   Future<void> _loadAIRecommendation() async {
@@ -421,7 +432,7 @@ class _CareHubScreenState extends State<CareHubScreen> {
                   Text(
                     'Tap for guided breathing & instant helpline access.',
                     style: GoogleFonts.dmSans(
-                      color: Colors.white70,
+                      color: Colors.red[900],
                       fontSize: 13,
                     ),
                   ),
@@ -717,6 +728,19 @@ class _CareHubScreenState extends State<CareHubScreen> {
                     initialDate: DateTime.now(),
                     firstDate: DateTime.now(),
                     lastDate: DateTime.now().add(const Duration(days: 90)),
+                    builder: (context, child) {
+                      return Theme(
+                        data: ThemeData.dark().copyWith(
+                          colorScheme: const ColorScheme.dark(
+                            primary: AppTheme.primary,
+                            surface: AppTheme.cardWhite,
+                            onSurface: Colors.white,
+                          ),
+                          dialogBackgroundColor: AppTheme.cardWhite,
+                        ),
+                        child: child!,
+                      );
+                    },
                   );
                   if (date != null) {
                     setState(() => _selectedDate = date);
@@ -747,6 +771,19 @@ class _CareHubScreenState extends State<CareHubScreen> {
                   final time = await showTimePicker(
                     context: context,
                     initialTime: TimeOfDay.now(),
+                    builder: (context, child) {
+                      return Theme(
+                        data: ThemeData.dark().copyWith(
+                          colorScheme: const ColorScheme.dark(
+                            primary: AppTheme.primary,
+                            surface: AppTheme.cardWhite,
+                            onSurface: Colors.white,
+                          ),
+                          dialogBackgroundColor: AppTheme.cardWhite,
+                        ),
+                        child: child!,
+                      );
+                    },
                   );
                   if (time != null) {
                     setState(() => _selectedTime = time);
@@ -794,10 +831,7 @@ class _CareHubScreenState extends State<CareHubScreen> {
     if (currentUid == null) return const SizedBox();
 
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('care_sessions')
-          .where('uid', isEqualTo: currentUid)
-          .snapshots(),
+      stream: _personalSessionsStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -1070,9 +1104,7 @@ class _CareHubScreenState extends State<CareHubScreen> {
 
   Widget _buildUpcomingSessionsList() {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('therapist_sessions')
-          .snapshots(),
+      stream: _upcomingSessionsStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Container(

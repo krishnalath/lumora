@@ -1366,6 +1366,19 @@ class _TherapistDashboardScreenState extends State<TherapistDashboardScreen> {
                                 lastDate: DateTime.now().add(
                                   const Duration(days: 365),
                                 ),
+                                builder: (context, child) {
+                                  return Theme(
+                                    data: ThemeData.dark().copyWith(
+                                      colorScheme: const ColorScheme.dark(
+                                        primary: AppTheme.primary,
+                                        surface: Color(0xFF1E212B),
+                                        onSurface: Colors.white,
+                                      ),
+                                      dialogBackgroundColor: const Color(0xFF1E212B),
+                                    ),
+                                    child: child!,
+                                  );
+                                },
                               );
                               if (picked != null) {
                                 setModalState(() => sessionDate = picked);
@@ -1411,6 +1424,19 @@ class _TherapistDashboardScreenState extends State<TherapistDashboardScreen> {
                               final picked = await showTimePicker(
                                 context: ctx,
                                 initialTime: sessionTime ?? TimeOfDay.now(),
+                                builder: (context, child) {
+                                  return Theme(
+                                    data: ThemeData.dark().copyWith(
+                                      colorScheme: const ColorScheme.dark(
+                                        primary: AppTheme.primary,
+                                        surface: Color(0xFF1E212B),
+                                        onSurface: Colors.white,
+                                      ),
+                                      dialogBackgroundColor: const Color(0xFF1E212B),
+                                    ),
+                                    child: child!,
+                                  );
+                                },
                               );
                               if (picked != null) {
                                 setModalState(() => sessionTime = picked);

@@ -1,5 +1,7 @@
-import 'package:google_generative_ai/google_generative_ai.dart';
-import '../native_bridge.dart'; // This connects to your C++ Brain
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:http/http.dart' as http;
+import '../native_bridge.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
@@ -30,14 +32,40 @@ class _AiChatScreenState extends State<AiChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  final _model = GenerativeModel(
-    model: 'gemini-2.5-flash',
-    apiKey: dotenv.env['GEMINI_API_KEY'] ?? '',
-  );
-  final _embeddingModel = GenerativeModel(
-    model: 'gemini-embedding-001',
-    apiKey: dotenv.env['GEMINI_API_KEY'] ?? '',
-  );
+  static const String _geminiModel = 'gemini-2.5-flash';
+  static const String _geminiEndpoint =
+      'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent';
+
+  Future<String> _callGemini(String prompt) async {
+    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+    final response = await http.post(
+      Uri.parse(_geminiEndpoint),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: jsonEncode({
+        'contents': [
+          {
+            'parts': [
+              {'text': prompt}
+            ]
+          }
+        ],
+        'generationConfig': {
+          'temperature': 0.9,
+          'maxOutputTokens': 1024,
+        }
+      }),
+    );
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['candidates'][0]['content']['parts'][0]['text'] as String;
+    } else {
+      final data = jsonDecode(response.body);
+      throw Exception(data['error']['message'] ?? 'HTTP ${response.statusCode}');
+    }
+  }
   bool _isLoading = false;
   int? _editingIndex; // index of user message being edited
 
@@ -171,6 +199,18 @@ class _AiChatScreenState extends State<AiChatScreen> {
     );
   }
 
+  Future<void> _saveCurrentConversationState() async {
+    if (_messages.isEmpty) return;
+    _currentConversation = Conversation(
+      id: _currentConversation.id,
+      title: _currentConversation.title,
+      messages: _messages,
+      createdAt: _currentConversation.createdAt,
+      lastModified: DateTime.now(),
+    );
+    await ConversationService.saveConversation(_currentConversation);
+  }
+
   Future<void> _sendMessage(String text) async {
     if (text.trim().isEmpty) return;
     if (!_hasApiKeyConfigured) {
@@ -201,6 +241,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
     });
 
     _msgController.clear();
+    await _saveCurrentConversationState();
 
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
@@ -213,50 +254,36 @@ class _AiChatScreenState extends State<AiChatScreen> {
     });
 
     try {
-      // 2. Embed: Convert text into Vector
-      final embedContent = Content.text(text);
-      final embeddingResponse = await _embeddingModel.embedContent(
-        embedContent,
-      );
-      final List<double> vector = embeddingResponse.embedding.values;
-
-      // 3. Retrieve: Pass Vector to C++ engine to find closest local context
-      final List<Map<String, dynamic>> searchResults =
-          VectorEngineBridge.searchVector(vector, 3);
-
-      // 4. Construct System Context with C++ DB Results + Health Tracking Data
+      // 2. Construct health context from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
-
-      // Read latest Mood, Energy from SharedPreferences (logged from Routine)
       final int currentMood = prefs.getInt('latest_mood') ?? -1;
       final int currentEnergy = prefs.getInt('latest_energy') ?? -1;
-      
-      // Read accurate sleep log from the modern SleepStorageService
       final todaySleep = await SleepStorageService.getTodaySleep();
-      final double currentSleepHours = todaySleep != null ? todaySleep.duration.inMinutes / 60.0 : -1.0;
-      final String currentSleepQuality = todaySleep != null ? '${todaySleep.durationFormatted}' : '';
+      final double currentSleepHours = todaySleep != null
+          ? todaySleep.duration.inMinutes / 60.0
+          : -1.0;
+      final String currentSleepQuality = todaySleep != null
+          ? todaySleep.durationFormatted
+          : '';
 
-      // Determine whether health values have changed since last injection
       final bool healthChanged =
           currentMood != _lastMood ||
           currentEnergy != _lastEnergy ||
           currentSleepHours != _lastSleepHours ||
           currentSleepQuality != _lastSleepQuality;
 
-      // Build the health context prefix only on first message or when data changed
       String healthContextPrefix = '';
       if (!_contextInjectedThisSession || healthChanged) {
         if (currentMood >= 0 || currentEnergy >= 0 || currentSleepHours >= 0) {
-          final moodStr = currentMood >= 0 ? '${currentMood}/10' : 'unknown';
-          final energyStr = currentEnergy >= 0 ? '${currentEnergy}/10' : 'unknown';
+          final moodStr = currentMood >= 0 ? '$currentMood/10' : 'unknown';
+          final energyStr = currentEnergy >= 0
+              ? '$currentEnergy/10'
+              : 'unknown';
           final sleepStr = currentSleepHours >= 0
               ? '${currentSleepHours.toStringAsFixed(1)} hrs'
               : 'Not logged today';
-
           healthContextPrefix =
               '[Health Context: Mood $moodStr, Energy $energyStr, Sleep $sleepStr]\n\n';
-
-          // Remember what we injected
           _lastMood = currentMood;
           _lastEnergy = currentEnergy;
           _lastSleepHours = currentSleepHours;
@@ -265,36 +292,25 @@ class _AiChatScreenState extends State<AiChatScreen> {
         }
       }
 
-      String contextString = 'Local DB Search Results:\n';
-      for (var result in searchResults) {
-        contextString +=
-            '- Context [ID: ${result['id']}]: Found relevant memory with distance ${result['distance'].toStringAsFixed(4)}\n';
-      }
-
+      // 3. Build full prompt with system context
       final String fullPrompt =
           '''
-You are Luna, a helpful privacy-first mental health companion within the Lumora app. 
+You are Luna, a warm, empathetic, and helpful mental health companion inside the Lumora app.
 
-Lumora App Features you should refer to when helping the user:
-- Sleep Insights: Users can manually log their bedtime and wake-up times to track their sleep patterns, calculate 7-day averages, and get weekly summaries.
-- Journal: Users can write daily journals, tag them, and save them for self-reflection.
-- Routines: Users can log Morning, Afternoon, and Night routines (which ask about their mood, energy, and daily activities).
-- Care Hub: A safe space for users to find professional help, access emergency hotlines, and utilize coping tools.
-- My Tasks: A place to manage daily to-do lists and goals.
+Lumora App Features:
+- Sleep Insights: Log bedtime/wake-up times, track sleep patterns and 7-day averages.
+- Journal: Write daily journals, tag them, and reflect on emotions.
+- Routines: Log Morning, Afternoon, Night routines including mood and energy check-ins.
+- Care Hub: Find professional therapists, emergency hotlines, and coping tools.
+- My Tasks: Manage daily to-do lists and personal goals.
 
-If the user describes a problem with a clear physical or technical solution (e.g., yoga for back pain, breathing for anxiety, meditation for sleep), include a special tag in your response exactly like [VIDEO_SEARCH: search_term]. Luna can automatically show a YouTube video to the user when this tag is present. Only use ONE tag per response.
+If the user describes a problem with a clear physical or technical solution (e.g., yoga for back pain, breathing for anxiety, meditation for sleep), include a special tag in your response exactly like [VIDEO_SEARCH: search_term]. Only use ONE tag per response.
 
-Use the following local context from the user's C++ database (which contains past journal entries, sleep logs, or routines) if it's relevant to their query. If no DB context is provided or relevant, just chat naturally based on your capabilities.
-
-$contextString
-
-${healthContextPrefix}User Question: $text
+${healthContextPrefix}User: $text
 ''';
 
-      // 5. Generate: Send prompt + local context to Gemini Flash
-      final chatContent = [Content.text(fullPrompt)];
-      final response = await _model.generateContent(chatContent);
-      String reply = response.text ?? "Sorry, I couldn't generate a response.";
+      // 4. Call Gemini via HTTP (supports both AIzaSy and AQ. key formats)
+      String reply = await _callGemini(fullPrompt);
       widget.onLiveStatusChanged?.call(true);
 
       // Check for video tag
@@ -319,9 +335,9 @@ ${healthContextPrefix}User Question: $text
             if (videoSearchTerm != null) 'isLoadingVideo': true,
           });
         });
-        
+
         final msgIndex = _messages.length - 1;
-        
+
         if (videoSearchTerm != null) {
           YouTubeService.searchBestVideo(videoSearchTerm).then((videoData) {
             if (mounted) {
@@ -467,11 +483,13 @@ ${healthContextPrefix}User Question: $text
           _messages.add({
             'isBot': true,
             'text':
-                "Something went wrong on my end. Please try again in a moment. 💙",
+                "Something went wrong on my end: $errorStr\nPlease check if your GEMINI_API_KEY is valid. 💙",
             'time':
                 '${TimeOfDay.now().hour}:${TimeOfDay.now().minute.toString().padLeft(2, '0')} AM',
           });
         });
+
+        await _saveCurrentConversationState();
 
         Future.delayed(const Duration(milliseconds: 100), () {
           if (_scrollController.hasClients) {
@@ -1521,6 +1539,8 @@ ${healthContextPrefix}User Question: $text
       _isLoading = true;
     });
 
+    await _saveCurrentConversationState();
+
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -1538,19 +1558,34 @@ ${healthContextPrefix}User Question: $text
     }
 
     try {
-      // Build multimodal parts: all images + optional caption + system prompt
-      final parts = <Part>[];
-      for (final file in imageFiles) {
-        final bytes = await file.readAsBytes();
-        parts.add(DataPart('image/jpeg', bytes));
-      }
+      // Build multimodal request using base64 images via HTTP
+      final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
       final userText = caption.isNotEmpty
           ? caption
           : 'Please analyze this image and respond empathetically as Luna, a mental health companion.';
-      parts.add(TextPart(userText));
 
-      final response = await _model.generateContent([Content.multi(parts)]);
-      final reply = response.text ?? "Sorry, I couldn't analyze the image(s).";
+      final parts = <Map<String, dynamic>>[];
+      for (final file in imageFiles) {
+        final bytes = await file.readAsBytes();
+        final base64Image = base64Encode(bytes);
+        parts.add({'inline_data': {'mime_type': 'image/jpeg', 'data': base64Image}});
+      }
+      parts.add({'text': userText});
+
+      final httpResponse = await http.post(
+        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'),
+        headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
+        body: jsonEncode({'contents': [{'parts': parts}]}),
+      );
+
+      final String reply;
+      if (httpResponse.statusCode == 200) {
+        final data = jsonDecode(httpResponse.body);
+        reply = data['candidates'][0]['content']['parts'][0]['text'] as String;
+      } else {
+        final data = jsonDecode(httpResponse.body);
+        throw Exception(data['error']['message'] ?? 'HTTP ${httpResponse.statusCode}');
+      }
       widget.onLiveStatusChanged?.call(true);
 
       if (mounted) {
@@ -1651,6 +1686,8 @@ ${healthContextPrefix}User Question: $text
             'time': time,
           });
         });
+
+        await _saveCurrentConversationState();
       }
     }
   }
@@ -1837,7 +1874,9 @@ class _ChatBubble extends StatelessWidget {
                                       code: GoogleFonts.dmMono(
                                         fontSize: 13,
                                         color: const Color(0xFF00E5FF),
-                                        backgroundColor: const Color(0xFF2A2E3B),
+                                        backgroundColor: const Color(
+                                          0xFF2A2E3B,
+                                        ),
                                       ),
                                     ),
                                     shrinkWrap: true,
@@ -1858,10 +1897,19 @@ class _ChatBubble extends StatelessWidget {
                                     const SizedBox(
                                       width: 16,
                                       height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Color(0xFF00E5FF),
+                                      ),
                                     ),
                                     const SizedBox(width: 8),
-                                    Text('Finding video...', style: GoogleFonts.dmSans(color: Colors.white70, fontSize: 12)),
+                                    Text(
+                                      'Finding video...',
+                                      style: GoogleFonts.dmSans(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1870,9 +1918,13 @@ class _ChatBubble extends StatelessWidget {
                                 video: YouTubeVideoData(
                                   id: message['videoData']['id'],
                                   title: message['videoData']['title'],
-                                  thumbnailUrl: message['videoData']['thumbnailUrl'],
+                                  thumbnailUrl:
+                                      message['videoData']['thumbnailUrl'],
                                   author: message['videoData']['author'],
-                                  duration: Duration(seconds: message['videoData']['durationInSeconds']),
+                                  duration: Duration(
+                                    seconds:
+                                        message['videoData']['durationInSeconds'],
+                                  ),
                                 ),
                               ),
                           ],

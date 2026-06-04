@@ -1,5 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -86,12 +87,7 @@ class CareHubService {
               '- ${p['name']} (${p['specialty']}): Specializes in ${p['strengths']}')
           .join('\n');
 
-      // 5. Ask Gemini
-      final model = GenerativeModel(
-        model: 'gemini-2.5-flash',
-        apiKey: dotenv.env['GEMINI_API_KEY'] ?? '',
-      );
-
+      // 5. Ask Gemini via HTTP
       final prompt = '''
 You are a smart mental health triage assistant for the Lumora app. Based on a user's recent journal entries and sleep data, recommend the SINGLE best professional from the available list.
 
@@ -109,10 +105,19 @@ PROFESSIONAL: [exact name from the list]
 REASON: [1-2 sentence personalized explanation of why this professional is the best fit right now]
 URGENCY: [LOW/MEDIUM/HIGH based on the emotional tone of their journals and sleep patterns]
 ''';
-
-      final response =
-          await model.generateContent([Content.text(prompt)]);
-      final text = response.text ?? '';
+      final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+      final httpResp = await http.post(
+        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'),
+        headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
+        body: jsonEncode({'contents': [{'parts': [{'text': prompt}]}]}),
+      );
+      final String text;
+      if (httpResp.statusCode == 200) {
+        final data = jsonDecode(httpResp.body);
+        text = data['candidates'][0]['content']['parts'][0]['text'] as String;
+      } else {
+        text = '';
+      }
 
       // 6. Parse the response
       final lines = text.trim().split('\n');

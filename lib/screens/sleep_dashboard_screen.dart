@@ -631,7 +631,7 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
           style: GoogleFonts.outfit(
             fontSize: 20,
             fontWeight: FontWeight.w800,
-            color: Colors.white,
+            color: AppTheme.textDark,
           ),
         ),
         const SizedBox(height: 16),
