@@ -307,6 +307,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
       }
 
       // 3. Build full prompt with system context
+      final List<Map<String, dynamic>> searchResults = [];
       String contextString = 'Local DB Search Results:\n';
       for (var result in searchResults) {
         contextString +=
