@@ -13,26 +13,10 @@ class SleepRecord {
   /// Detected sleep end time (null if still sleeping)
   final DateTime? sleepEnd;
 
-  /// Composite confidence score (0–100) from sensor signals
-  final int confidenceScore;
-
-  /// Whether the phone was charging during the sleep session
-  final bool isCharging;
-
-  /// Average accelerometer magnitude during the session (m/s²)
-  final double avgMotion;
-
-  /// Number of brief wake-ups detected during the session
-  final int interruptions;
-
   SleepRecord({
     required this.id,
     required this.sleepStart,
     this.sleepEnd,
-    required this.confidenceScore,
-    required this.isCharging,
-    required this.avgMotion,
-    this.interruptions = 0,
   });
 
   /// Total sleep duration. Returns Duration.zero if sleep is still in progress.
@@ -50,15 +34,13 @@ class SleepRecord {
     return '${hours}h ${minutes}m';
   }
 
-  /// Sleep wellness score (0–100) based on duration, interruptions, and confidence.
+  /// Sleep wellness score (0–100) based on duration.
   ///
   /// Scoring breakdown:
-  ///   Base:                       50
+  ///   Base:                       70
   ///   Duration 7–9h:             +30   (6–7h or 9–10h: +15, else: 0)
-  ///   Few interruptions (0–1):   +10   (2–3: +5, 4+: 0)
-  ///   High confidence (≥80):     +10
   int get sleepScore {
-    int score = 50;
+    int score = 70;
     final hours = duration.inMinutes / 60.0;
 
     // Duration scoring
@@ -66,18 +48,6 @@ class SleepRecord {
       score += 30;
     } else if ((hours >= 6 && hours < 7) || (hours > 9 && hours <= 10)) {
       score += 15;
-    }
-
-    // Interruption scoring
-    if (interruptions <= 1) {
-      score += 10;
-    } else if (interruptions <= 3) {
-      score += 5;
-    }
-
-    // Confidence scoring
-    if (confidenceScore >= 80) {
-      score += 10;
     }
 
     return score.clamp(0, 100);
@@ -104,10 +74,6 @@ class SleepRecord {
       'id': id,
       'sleepStart': sleepStart.toIso8601String(),
       'sleepEnd': sleepEnd?.toIso8601String(),
-      'confidenceScore': confidenceScore,
-      'isCharging': isCharging,
-      'avgMotion': avgMotion,
-      'interruptions': interruptions,
     };
   }
 
@@ -119,10 +85,6 @@ class SleepRecord {
       sleepEnd: json['sleepEnd'] != null
           ? DateTime.parse(json['sleepEnd'] as String)
           : null,
-      confidenceScore: json['confidenceScore'] as int,
-      isCharging: json['isCharging'] as bool,
-      avgMotion: (json['avgMotion'] as num).toDouble(),
-      interruptions: json['interruptions'] as int? ?? 0,
     );
   }
 }

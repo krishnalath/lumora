@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
-import 'login_screen.dart';
+import 'role_selection_screen.dart';
 import 'main_shell.dart';
+import 'therapist_dashboard_screen.dart';
 
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
@@ -21,14 +23,36 @@ class AuthWrapper extends StatelessWidget {
           );
         }
 
-        // If we have data (a user), show the main app
+        // If we have data (a user), check their role
         if (snapshot.hasData) {
-          return const MainShell();
+          return FutureBuilder<String>(
+            future: _getUserRole(),
+            builder: (context, roleSnapshot) {
+              if (roleSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
+
+              final role = roleSnapshot.data ?? 'user';
+
+              if (role == 'therapist') {
+                return const TherapistDashboardScreen();
+              }
+
+              return const MainShell();
+            },
+          );
         }
 
-        // Otherwise, show the login screen
-        return const LoginScreen();
+        // Otherwise, show the role selection screen
+        return const RoleSelectionScreen();
       },
     );
+  }
+
+  Future<String> _getUserRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('user_role') ?? 'user';
   }
 }

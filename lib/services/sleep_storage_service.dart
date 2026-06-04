@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,6 +21,24 @@ class SleepStorageService {
   static const String _lastLogDateKey = 'sleep_last_log_date';
 
   static final FirestoreService _firestore = FirestoreService();
+
+  /// Tracks whether the initial Firestore sync has completed.
+  /// Screens can call [ensureSynced] to wait for it before loading data.
+  static Completer<void>? _syncCompleter;
+
+  /// Wait for the in-flight Firestore sync to finish (if any).
+  /// Times out after [timeout] so the UI isn't blocked forever on
+  /// slow/offline networks.
+  static Future<void> ensureSynced({Duration timeout = const Duration(seconds: 3)}) async {
+    if (_syncCompleter != null && !_syncCompleter!.isCompleted) {
+      try {
+        await _syncCompleter!.future.timeout(timeout);
+      } catch (_) {
+        // Timeout or error — proceed with whatever local data we have
+        debugPrint('Sleep sync timed out — using local data');
+      }
+    }
+  }
 
   // ── ISO week helpers ─────────────────────────────────────────────
 
@@ -227,13 +246,37 @@ class SleepStorageService {
   }
 
   /// Check if the user already logged sleep today.
+  /// Checks the explicit flag first, then falls back to checking
+  /// whether actual sleep data exists for today's weekday.
   static Future<bool> hasLoggedToday() async {
     final prefs = await SharedPreferences.getInstance();
-    final lastLog = prefs.getString(_lastLogDateKey);
-    if (lastLog == null) return false;
     final now = DateTime.now();
     final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    return lastLog == today;
+
+    // Fast path: explicit flag
+    final lastLog = prefs.getString(_lastLogDateKey);
+    if (lastLog == today) return true;
+
+    // Fallback: check if there's actual data for today's weekday
+    // (covers cases where flag was lost, e.g. after cloud sync / reinstall)
+    final weekDataStr = prefs.getString(_currentWeekKey) ?? '{}';
+    try {
+      final Map<String, dynamic> weekData = json.decode(weekDataStr);
+      final todayKey = now.weekday.toString();
+      if (weekData.containsKey(todayKey)) {
+        // Verify the record is actually from today, not a different week's same weekday
+        final record = SleepRecord.fromJson(weekData[todayKey] as Map<String, dynamic>);
+        final recordDate = record.sleepEnd ?? record.sleepStart;
+        final recordDay = '${recordDate.year}-${recordDate.month.toString().padLeft(2, '0')}-${recordDate.day.toString().padLeft(2, '0')}';
+        if (recordDay == today || record.sleepStart.day == now.day) {
+          // Restore the flag so future checks are fast
+          await prefs.setString(_lastLogDateKey, today);
+          return true;
+        }
+      }
+    } catch (_) {}
+
+    return false;
   }
 
   /// Mark today as logged.
@@ -259,10 +302,6 @@ class SleepStorageService {
       id: bedtime.millisecondsSinceEpoch.toString(),
       sleepStart: bedtime,
       sleepEnd: wakeup,
-      confidenceScore: 95, // User-reported = high confidence
-      isCharging: false,
-      avgMotion: 0.0,
-      interruptions: 0,
     );
 
     await saveSleepRecord(record);
@@ -299,6 +338,18 @@ class SleepStorageService {
   /// Call this on app startup or login to hydrate the local cache
   /// with cloud data (e.g., when switching devices).
   static Future<void> syncFromFirestore() async {
+    // Set up completer so other code can await this sync
+    _syncCompleter = Completer<void>();
+    try {
+      await _syncFromFirestoreInternal();
+    } finally {
+      if (!_syncCompleter!.isCompleted) {
+        _syncCompleter!.complete();
+      }
+    }
+  }
+
+  static Future<void> _syncFromFirestoreInternal() async {
     try {
       final now = DateTime.now();
 
@@ -339,6 +390,21 @@ class SleepStorageService {
       // Update week tracking
       await prefs.setInt(_weekNumberKey, _isoWeekNumber(now));
       await prefs.setInt(_weekYearKey, _isoWeekYear(now));
+
+      // Restore the "logged today" flag if today's data came from the cloud
+      final todayKey = now.weekday.toString();
+      if (localData.containsKey(todayKey)) {
+        try {
+          final record = SleepRecord.fromJson(localData[todayKey] as Map<String, dynamic>);
+          final recordDate = record.sleepEnd ?? record.sleepStart;
+          if (recordDate.year == now.year &&
+              recordDate.month == now.month &&
+              recordDate.day == now.day) {
+            final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+            await prefs.setString(_lastLogDateKey, todayStr);
+          }
+        } catch (_) {}
+      }
 
       debugPrint('Sleep sync from Firestore complete: ${cloudRecords.length} records merged.');
     } catch (e) {

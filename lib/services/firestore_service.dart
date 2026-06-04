@@ -162,8 +162,6 @@ class FirestoreService {
 
     final docId = recordJson['id'] as String;
     await _db
-        .collection('users')
-        .doc(user.uid)
         .collection('sleep_records')
         .doc(docId)
         .set({
@@ -183,16 +181,30 @@ class FirestoreService {
     if (user == null) return [];
 
     final snapshot = await _db
-        .collection('users')
-        .doc(user.uid)
         .collection('sleep_records')
-        .where('sleepStart',
-            isGreaterThanOrEqualTo: weekStart.toIso8601String())
-        .where('sleepStart', isLessThan: weekEnd.toIso8601String())
-        .orderBy('sleepStart')
+        .where('uid', isEqualTo: user.uid)
         .get();
 
-    return snapshot.docs.map((doc) => doc.data()).toList();
+    final docs = snapshot.docs.map((doc) => doc.data()).toList();
+    
+    // Filter by weekStart and weekEnd in memory to avoid needing composite indexes
+    final startStr = weekStart.toIso8601String();
+    final endStr = weekEnd.toIso8601String();
+    
+    final filtered = docs.where((data) {
+      final sleepStart = data['sleepStart'] as String?;
+      if (sleepStart == null) return false;
+      return sleepStart.compareTo(startStr) >= 0 && sleepStart.compareTo(endStr) < 0;
+    }).toList();
+
+    // Sort by sleepStart ascending
+    filtered.sort((a, b) {
+      final aStart = a['sleepStart'] as String? ?? '';
+      final bStart = b['sleepStart'] as String? ?? '';
+      return aStart.compareTo(bStart);
+    });
+
+    return filtered;
   }
 
   /// Fetch all sleep records within the last [days] days.
@@ -200,17 +212,28 @@ class FirestoreService {
     final user = _auth.currentUser;
     if (user == null) return [];
 
-    final cutoff = DateTime.now().subtract(Duration(days: days));
     final snapshot = await _db
-        .collection('users')
-        .doc(user.uid)
         .collection('sleep_records')
-        .where('sleepStart',
-            isGreaterThanOrEqualTo: cutoff.toIso8601String())
-        .orderBy('sleepStart', descending: true)
+        .where('uid', isEqualTo: user.uid)
         .get();
 
-    return snapshot.docs.map((doc) => doc.data()).toList();
+    final docs = snapshot.docs.map((doc) => doc.data()).toList();
+    final cutoffStr = DateTime.now().subtract(Duration(days: days)).toIso8601String();
+
+    final filtered = docs.where((data) {
+      final sleepStart = data['sleepStart'] as String?;
+      if (sleepStart == null) return false;
+      return sleepStart.compareTo(cutoffStr) >= 0;
+    }).toList();
+
+    // Sort by sleepStart descending
+    filtered.sort((a, b) {
+      final aStart = a['sleepStart'] as String? ?? '';
+      final bStart = b['sleepStart'] as String? ?? '';
+      return bStart.compareTo(aStart);
+    });
+
+    return filtered;
   }
 
   /// Delete a specific sleep record by its ID.
@@ -219,8 +242,6 @@ class FirestoreService {
     if (user == null) return;
 
     await _db
-        .collection('users')
-        .doc(user.uid)
         .collection('sleep_records')
         .doc(recordId)
         .delete();
@@ -231,10 +252,9 @@ class FirestoreService {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    final docId = '${avgData['year']}_w${avgData['week']}';
+    // Use a unique document ID per user to prevent collision in top-level collection
+    final docId = '${user.uid}_${avgData['year']}_w${avgData['week']}';
     await _db
-        .collection('users')
-        .doc(user.uid)
         .collection('sleep_weekly_averages')
         .doc(docId)
         .set({
@@ -250,13 +270,92 @@ class FirestoreService {
     if (user == null) return [];
 
     final snapshot = await _db
-        .collection('users')
-        .doc(user.uid)
         .collection('sleep_weekly_averages')
-        .orderBy('year', descending: true)
+        .where('uid', isEqualTo: user.uid)
         .get();
 
-    return snapshot.docs.map((doc) => doc.data()).toList();
+    final docs = snapshot.docs.map((doc) => doc.data()).toList();
+
+    // Sort by year descending, then week descending
+    docs.sort((a, b) {
+      final aYear = a['year'] as int? ?? 0;
+      final bYear = b['year'] as int? ?? 0;
+      if (aYear != bYear) {
+        return bYear.compareTo(aYear);
+      }
+      final aWeek = a['week'] as int? ?? 0;
+      final bWeek = b['week'] as int? ?? 0;
+      return bWeek.compareTo(aWeek);
+    });
+
+    return docs;
+  }
+
+  // ── Care Hub Methods ───────────────────────────────────────────
+
+  Future<void> bookCareSession({
+    required String professionalName,
+    required DateTime date,
+    required TimeOfDay time,
+    String? briefing,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Must be logged in to book a session');
+
+    await _db.collection('care_sessions').add({
+      'uid': user.uid,
+      'patientName': user.displayName ?? 'Patient',
+      'professionalName': professionalName,
+      'date': Timestamp.fromDate(DateTime(date.year, date.month, date.day)),
+      'time': '${time.hour}:${time.minute}',
+      'status': 'upcoming',
+      'createdAt': FieldValue.serverTimestamp(),
+      if (briefing != null) 'briefing': briefing,
+    });
+  }
+
+  // ── Secure Chat Methods ─────────────────────────────────────────
+
+  /// Send a message in a chat thread with a professional.
+  /// The chatId is derived from the professional name for simplicity.
+  Future<void> sendChatMessage({
+    required String chatId,
+    required String text,
+    bool isVoiceNote = false,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Must be logged in to send messages');
+
+    await _db
+        .collection('care_chats')
+        .doc(chatId)
+        .collection('messages')
+        .add({
+      'uid': user.uid,
+      'senderName': user.displayName ?? 'You',
+      'text': text,
+      'isVoiceNote': isVoiceNote,
+      'isUser': true,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // Update the chat metadata (last message preview)
+    await _db.collection('care_chats').doc(chatId).set({
+      'uid': user.uid,
+      'patientName': user.displayName ?? 'Patient',
+      'lastMessage': text,
+      'lastMessageAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Stream of messages for a specific chat thread (real-time).
+  Stream<QuerySnapshot> getChatMessages(String chatId) {
+    return _db
+        .collection('care_chats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('createdAt', descending: false)
+        .snapshots();
   }
 }
 

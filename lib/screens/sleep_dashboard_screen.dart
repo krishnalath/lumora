@@ -46,6 +46,11 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
+
+    // Wait for any in-flight Firestore sync to finish first
+    // (times out after 3s so we don't block on slow/offline networks)
+    await SleepStorageService.ensureSynced();
+
     final today = await SleepStorageService.getTodaySleep();
     final weekly = await SleepStorageService.getWeeklySummary();
     final avg = await SleepStorageService.getWeeklyAverageSleep();

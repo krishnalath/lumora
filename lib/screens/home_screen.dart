@@ -32,6 +32,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadWeeklySleepSummary() async {
+    // Wait for any in-flight Firestore sync to complete
+    await SleepStorageService.ensureSynced();
+
     final summary = await SleepStorageService.getWeeklySummary();
     final avg = await SleepStorageService.getWeeklyAverageSleep();
     if (mounted) {
