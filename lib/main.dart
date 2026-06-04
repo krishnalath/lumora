@@ -6,6 +6,7 @@ import 'theme/app_theme.dart';
 import 'screens/auth_wrapper.dart';
 import 'native_bridge.dart'; // Import your native bridge
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'screens/intro_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,7 +49,7 @@ class MindEaseApp extends StatelessWidget {
       title: 'LUMORA',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
-      home: const AuthWrapper(),
+      home: const IntroScreen(),
     );
   }
 }

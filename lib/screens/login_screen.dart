@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
 import 'signup_screen.dart';
@@ -29,6 +30,10 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
       try {
+        // Save role to SharedPreferences BEFORE authenticating to fix routing race condition
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_role', 'user');
+
         await AuthService().signInWithEmailPassword(
           _emailController.text.trim(),
           _passwordController.text,
@@ -253,6 +258,22 @@ class _LoginScreenState extends State<LoginScreen> {
                             ],
                           ),
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    
+                    // Return to role selection
+                    TextButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back, size: 18),
+                      label: Text(
+                        'Return to role selection',
+                        style: GoogleFonts.dmSans(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.textMedium,
                       ),
                     ),
                   ],

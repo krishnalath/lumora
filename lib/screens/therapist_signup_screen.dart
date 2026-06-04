@@ -2,111 +2,90 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
-import '../services/auth_service.dart';
-import 'therapist_signup_screen.dart';
 
-/// Login screen for therapists. Uses the same Firebase Auth but validates
-/// that the email belongs to a predefined list of therapist accounts.
-class TherapistLoginScreen extends StatefulWidget {
-  const TherapistLoginScreen({super.key});
+class TherapistSignupScreen extends StatefulWidget {
+  const TherapistSignupScreen({super.key});
 
   @override
-  State<TherapistLoginScreen> createState() => _TherapistLoginScreenState();
+  State<TherapistSignupScreen> createState() => _TherapistSignupScreenState();
 }
 
-class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
+class _TherapistSignupScreenState extends State<TherapistSignupScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _specialtyController = TextEditingController();
+  final _phoneController = TextEditingController();
+  
   bool _obscurePassword = true;
   bool _isLoading = false;
 
   @override
   void dispose() {
+    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _specialtyController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
-  Future<void> _handleLogin() async {
+  Future<void> _handleSignup() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final email = _emailController.text.trim();
-    final lowerEmail = email.toLowerCase();
     setState(() => _isLoading = true);
 
     try {
-      // 1. Save role to SharedPreferences BEFORE authenticating
-      // This prevents the AuthWrapper stream from routing the user as a normal user.
+      final email = _emailController.text.trim().toLowerCase();
+      final name = _nameController.text.trim();
+
+      // 1. Check if name already exists in therapist_profiles
+      final existingDoc = await FirebaseFirestore.instance
+          .collection('therapist_profiles')
+          .doc(name)
+          .get();
+
+      if (existingDoc.exists) {
+        throw Exception('A therapist profile with this name already exists. Please use a different name or login.');
+      }
+
+      // 2. Set role to SharedPreferences BEFORE authenticating
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_role', 'therapist');
+      await prefs.setString('therapist_name', name);
 
-      // 2. Authenticate (FirebaseAuth handles case insensitivity internally)
-      final userCredential = await AuthService().signInWithEmailPassword(
-        email,
-        _passwordController.text,
+      // 3. Create Firebase Auth User
+      final userCredential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(
+        email: email,
+        password: _passwordController.text,
       );
 
-      // 3. Resolve therapist name AFTER authenticating
-      QuerySnapshot profileSnapshot = await FirebaseFirestore.instance
+      // 4. Create Therapist Profile in Firestore
+      await FirebaseFirestore.instance
           .collection('therapist_profiles')
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
-          
-      if (profileSnapshot.docs.isEmpty && email != lowerEmail) {
-        profileSnapshot = await FirebaseFirestore.instance
-            .collection('therapist_profiles')
-            .where('email', isEqualTo: lowerEmail)
-            .limit(1)
-            .get();
-      }
+          .doc(name)
+          .set({
+        'name': name,
+        'email': email,
+        'specialty': _specialtyController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'bio': '',
+        'isApproved': true, // User requested to allow them to login for now
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 
-      String therapistName = 'Therapist';
-      if (profileSnapshot.docs.isNotEmpty) {
-        final profileData = profileSnapshot.docs.first.data() as Map<String, dynamic>;
-        therapistName = profileData['name'] as String? ?? 'Therapist';
-      } else {
-        // Fallback for existing manually created therapists
-        final rawPrefix = email.split('@')[0];
-        final cleanPrefix = rawPrefix.toLowerCase();
-        
-        // Match hardcoded names if possible
-        if (cleanPrefix.contains('sarah')) {
-          therapistName = 'Dr. Sarah';
-        } else if (cleanPrefix.contains('jane')) {
-          therapistName = 'Dr. Jane';
-        } else if (cleanPrefix.contains('mark')) {
-          therapistName = 'Mark P.';
-        } else {
-          final capitalizedPrefix = rawPrefix.isNotEmpty 
-              ? '${rawPrefix[0].toUpperCase()}${rawPrefix.substring(1)}'
-              : rawPrefix;
-          therapistName = 'Dr. $capitalizedPrefix';
-        }
-      }
-
-      // Enforce correct capitalization even if profileData had it wrong
-      if (therapistName.toLowerCase().contains('sarah')) {
-        therapistName = 'Dr. Sarah';
-      } else if (therapistName.toLowerCase().contains('jane')) {
-        therapistName = 'Dr. Jane';
-      } else if (therapistName.toLowerCase().contains('mark')) {
-        therapistName = 'Mark P.';
-      }
-
-      // 4. Save therapist name
-      await prefs.setString('therapist_name', therapistName);
-
+      // 5. Navigate to Dashboard (AuthWrapper will handle it based on stream, but we pop until root)
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
-      // Revert SharedPreferences if login failed
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('user_role');
-      await prefs.remove('therapist_name');
       
       if (mounted) {
         AppTheme.showCustomSnackBar(context, e.toString(), isError: true);
@@ -114,24 +93,6 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  String? _validateEmail(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Please enter your email';
-    }
-    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-    if (!emailRegex.hasMatch(value)) {
-      return 'Please enter a valid email address';
-    }
-    return null;
-  }
-
-  String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Please enter your password';
-    }
-    return null;
   }
 
   @override
@@ -144,7 +105,7 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
             end: Alignment.bottomRight,
             colors: [
               Color(0xFFF6F5F2),
-              Color(0xFFF0ECFA), // Subtle lavender tint
+              Color(0xFFF0ECFA),
               Color(0xFFF6F5F2),
             ],
             stops: [0.0, 0.5, 1.0],
@@ -153,15 +114,13 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
               child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // App Name
                     Text(
                       'LUMORA',
                       style: GoogleFonts.playfairDisplay(
@@ -173,14 +132,13 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
                     ),
                     const SizedBox(height: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                       decoration: BoxDecoration(
                         color: AppTheme.accentLavender.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        'THERAPIST PORTAL',
+                        'THERAPIST ONBOARDING',
                         style: GoogleFonts.dmSans(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -191,7 +149,6 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
                     ),
                     const SizedBox(height: 48),
 
-                    // Form Card
                     Container(
                       padding: const EdgeInsets.all(32),
                       decoration: BoxDecoration(
@@ -210,7 +167,7 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Welcome, Doctor',
+                            'Create Account',
                             style: GoogleFonts.dmSans(
                               fontSize: 28,
                               fontWeight: FontWeight.bold,
@@ -220,7 +177,7 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Sign in to access your patient dashboard.',
+                            'Join Lumora to support mental well-being.',
                             style: GoogleFonts.dmSans(
                               fontSize: 15,
                               color: AppTheme.textMedium,
@@ -228,18 +185,25 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
                           ),
                           const SizedBox(height: 32),
 
-                          // Email field
-                          _buildInputLabel('Therapist Email'),
+                          _buildInputLabel('Full Name'),
+                          _buildTextField(
+                            controller: _nameController,
+                            hintText: 'Dr. John Doe',
+                            icon: Icons.person_outline,
+                            validator: (v) => v!.isEmpty ? 'Enter your name' : null,
+                          ),
+                          const SizedBox(height: 20),
+
+                          _buildInputLabel('Email Address'),
                           _buildTextField(
                             controller: _emailController,
-                            hintText: 'dr.sarah@lumora.care',
-                            icon: Icons.medical_services_outlined,
+                            hintText: 'name@example.com',
+                            icon: Icons.email_outlined,
                             keyboardType: TextInputType.emailAddress,
-                            validator: _validateEmail,
+                            validator: (v) => v!.isEmpty ? 'Enter your email' : null,
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 20),
 
-                          // Password field
                           _buildInputLabel('Password'),
                           _buildTextField(
                             controller: _passwordController,
@@ -248,28 +212,40 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
                             obscureText: _obscurePassword,
                             suffixIcon: IconButton(
                               icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
+                                _obscurePassword ? Icons.visibility_off : Icons.visibility,
                                 color: AppTheme.textMedium,
                                 size: 20,
                               ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePassword = !_obscurePassword;
-                                });
-                              },
+                              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                             ),
-                            validator: _validatePassword,
+                            validator: (v) => v!.length < 8 ? 'Min 8 characters' : null,
                           ),
+                          const SizedBox(height: 20),
+                          
+                          _buildInputLabel('Specialty'),
+                          _buildTextField(
+                            controller: _specialtyController,
+                            hintText: 'e.g. CBT, Sleep Expert',
+                            icon: Icons.psychology_outlined,
+                            validator: (v) => v!.isEmpty ? 'Enter your specialty' : null,
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          _buildInputLabel('Phone Number'),
+                          _buildTextField(
+                            controller: _phoneController,
+                            hintText: '+1 234 567 890',
+                            icon: Icons.phone_outlined,
+                            keyboardType: TextInputType.phone,
+                          ),
+                          
                           const SizedBox(height: 40),
 
-                          // Login Button — lavender instead of cyan
                           SizedBox(
                             width: double.infinity,
                             height: 56,
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : _handleLogin,
+                              onPressed: _isLoading ? null : _handleSignup,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppTheme.accentLavender,
                                 foregroundColor: Colors.white,
@@ -278,78 +254,35 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
                                   borderRadius: BorderRadius.circular(28),
                                 ),
                               ),
-                              child: _isLoading
-                                  ? const SizedBox(
-                                      height: 24,
-                                      width: 24,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          'Access Portal',
-                                          style: GoogleFonts.dmSans(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w700,
-                                            letterSpacing: 0.5,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        const Icon(Icons.arrow_forward,
-                                            size: 20),
-                                      ],
+                              child: _isLoading 
+                                ? const SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
                                     ),
+                                  )
+                                : Text(
+                                    'Create Account',
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
                             ),
                           ),
                         ],
                       ),
                     ),
-
+                    
                     const SizedBox(height: 24),
-
-                    // Signup Link for Therapists
-                    Center(
-                      child: GestureDetector(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (context) => const TherapistSignupScreen()),
-                          );
-                        },
-                        child: RichText(
-                          text: TextSpan(
-                            text: 'Want to join as a therapist? ',
-                            style: GoogleFonts.dmSans(
-                              fontSize: 15,
-                              color: AppTheme.textMedium,
-                            ),
-                            children: [
-                              TextSpan(
-                                text: 'Create Account',
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 15,
-                                  color: AppTheme.accentLavender,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Return to role selection
                     TextButton.icon(
                       onPressed: () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.arrow_back, size: 18),
                       label: Text(
-                        'Return to role selection',
+                        'Back to login',
                         style: GoogleFonts.dmSans(
                           fontWeight: FontWeight.bold,
                         ),
@@ -414,9 +347,7 @@ class _TherapistLoginScreenState extends State<TherapistLoginScreen> {
         filled: true,
         fillColor: const Color(0xFFF8F9FA),
         contentPadding: const EdgeInsets.symmetric(vertical: 18.0),
-        errorStyle: GoogleFonts.dmSans(
-          color: Colors.red[400],
-        ),
+        errorStyle: GoogleFonts.dmSans(color: Colors.red[400]),
       ),
     );
   }

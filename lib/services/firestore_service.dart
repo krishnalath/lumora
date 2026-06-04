@@ -308,7 +308,7 @@ class FirestoreService {
       'professionalName': professionalName,
       'date': Timestamp.fromDate(DateTime(date.year, date.month, date.day)),
       'time': '${time.hour}:${time.minute}',
-      'status': 'upcoming',
+      'status': 'pending',
       'createdAt': FieldValue.serverTimestamp(),
       if (briefing != null) 'briefing': briefing,
     });

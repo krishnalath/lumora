@@ -1,30 +1,28 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:my_app/main.dart';
+import 'package:my_app/models/sleep_record.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MindEaseApp());
+  test('SleepRecord score calculations', () {
+    // 8-hour sleep duration (within 7-9h optimal range)
+    final recordExcellent = SleepRecord(
+      id: '1',
+      sleepStart: DateTime(2026, 6, 4, 22, 0),
+      sleepEnd: DateTime(2026, 6, 5, 6, 0),
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(recordExcellent.duration.inHours, 8);
+    expect(recordExcellent.sleepScore, 100); // 70 base + 30 bonus
+    expect(recordExcellent.qualityLabel, 'Excellent');
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // 4-hour sleep duration (outside optimal/suboptimal ranges)
+    final recordPoor = SleepRecord(
+      id: '2',
+      sleepStart: DateTime(2026, 6, 4, 22, 0),
+      sleepEnd: DateTime(2026, 6, 5, 2, 0),
+    );
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(recordPoor.duration.inHours, 4);
+    expect(recordPoor.sleepScore, 70); // 70 base + 0 bonus
+    expect(recordPoor.qualityLabel, 'Good'); // 70 is marked as Good
   });
 }
