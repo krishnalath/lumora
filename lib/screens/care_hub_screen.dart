@@ -201,6 +201,32 @@ class _CareHubScreenState extends State<CareHubScreen> {
                 textAlign: TextAlign.center,
                 style: GoogleFonts.dmSans(color: Colors.white54, fontSize: 14),
               ),
+              if (_shareBriefing) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentLavender.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.insights,
+                          color: AppTheme.accentLavender, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Insights shared with therapist',
+                        style: GoogleFonts.dmSans(
+                          color: AppTheme.accentLavender,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
@@ -823,6 +849,40 @@ class _CareHubScreenState extends State<CareHubScreen> {
               ),
             ],
           ),
+
+          const SizedBox(height: 16),
+
+          // Pre-session briefing toggle
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.accentLavender.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.insights,
+                    color: AppTheme.accentLavender, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Share recent insights with therapist',
+                    style: GoogleFonts.dmSans(
+                      color: Colors.white70,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                Switch(
+                  value: _shareBriefing,
+                  onChanged: (val) =>
+                      setState(() => _shareBriefing = val),
+                  activeColor: AppTheme.accentLavender,
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: 20),
 
           // Book button

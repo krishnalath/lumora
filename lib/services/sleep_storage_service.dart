@@ -179,7 +179,7 @@ class SleepStorageService {
     }
   }
 
-  /// Get the current week's summary: Map<weekday, SleepRecord?> for Mon(1)–Sun(7).
+  /// Get the current week's summary: `Map<weekday, SleepRecord?>` for Mon(1)–Sun(7).
   static Future<Map<int, SleepRecord?>> getWeeklySummary() async {
     await _rotateWeekIfNeeded();
     final prefs = await SharedPreferences.getInstance();
@@ -310,15 +310,120 @@ class SleepStorageService {
   }
 
   /// Get the history of past weekly averages.
+  /// Reads from local SharedPreferences first; falls back to Firestore
+  /// `sleep_weekly_averages`, then computes from raw `sleep_records`.
   static Future<List<Map<String, dynamic>>> getWeeklyHistory() async {
     final prefs = await SharedPreferences.getInstance();
     final historyStr = prefs.getString(_historyKey) ?? '[]';
     try {
       final List<dynamic> history = json.decode(historyStr);
-      return history.cast<Map<String, dynamic>>();
-    } catch (_) {
-      return [];
+      if (history.isNotEmpty) {
+        return history.cast<Map<String, dynamic>>();
+      }
+    } catch (_) {}
+
+    // Fallback 1: Try pre-aggregated weekly averages from Firestore
+    try {
+      final cloudAverages = await _firestore.getSleepWeeklyAverages();
+      if (cloudAverages.isNotEmpty) {
+        final List<Map<String, dynamic>> normalised = cloudAverages.map((e) => {
+          'week': e['week'],
+          'year': e['year'],
+          'avgHours': (e['avgHours'] as num?)?.toDouble() ?? 0.0,
+          'daysLogged': e['daysLogged'] as int? ?? 0,
+          'archivedAt': e['archivedAt'] ?? e['updatedAt']?.toString() ?? DateTime.now().toIso8601String(),
+        }).toList();
+
+        normalised.sort((a, b) {
+          final aYear = (a['year'] as int?) ?? 0;
+          final bYear = (b['year'] as int?) ?? 0;
+          if (aYear != bYear) return aYear.compareTo(bYear);
+          return ((a['week'] as int?) ?? 0).compareTo((b['week'] as int?) ?? 0);
+        });
+
+        await prefs.setString(_historyKey, json.encode(normalised));
+        return normalised;
+      }
+    } catch (e) {
+      debugPrint('Firestore weekly averages fallback failed: $e');
     }
+
+    // Fallback 2: Compute from raw sleep_records in Firestore
+    try {
+      final rawRecords = await _firestore.getSleepHistory(days: 365);
+      if (rawRecords.isEmpty) return [];
+
+      final now = DateTime.now();
+      final currentWeek = _isoWeekNumber(now);
+      final currentYear = _isoWeekYear(now);
+
+      // Group records by ISO (year, week), skipping the current week
+      final Map<String, List<double>> weeklyMinutes = {};
+      for (final recordJson in rawRecords) {
+        try {
+          final record = SleepRecord.fromJson(recordJson);
+          if (record.sleepEnd == null) continue;
+
+          final wakeDate = record.sleepEnd!;
+          final week = _isoWeekNumber(wakeDate);
+          final year = _isoWeekYear(wakeDate);
+
+          // Skip the current week (it's not a "past" insight yet)
+          if (week == currentWeek && year == currentYear) continue;
+
+          final key = '${year}_$week';
+          weeklyMinutes.putIfAbsent(key, () => []);
+          weeklyMinutes[key]!.add(record.duration.inMinutes.toDouble());
+        } catch (_) {}
+      }
+
+      if (weeklyMinutes.isEmpty) return [];
+
+      final List<Map<String, dynamic>> computed = [];
+      for (final entry in weeklyMinutes.entries) {
+        final parts = entry.key.split('_');
+        final year = int.parse(parts[0]);
+        final week = int.parse(parts[1]);
+        final minutes = entry.value;
+        final avgHours = minutes.reduce((a, b) => a + b) / (minutes.length * 60.0);
+
+        final avgEntry = {
+          'week': week,
+          'year': year,
+          'avgHours': avgHours,
+          'daysLogged': minutes.length,
+          'archivedAt': DateTime.now().toIso8601String(),
+        };
+        computed.add(avgEntry);
+
+        // Also save to Firestore so future loads are faster
+        try {
+          await _firestore.saveSleepWeeklyAverage(avgEntry);
+        } catch (_) {}
+      }
+
+      // Sort oldest first
+      computed.sort((a, b) {
+        final aYear = (a['year'] as int?) ?? 0;
+        final bYear = (b['year'] as int?) ?? 0;
+        if (aYear != bYear) return aYear.compareTo(bYear);
+        return ((a['week'] as int?) ?? 0).compareTo((b['week'] as int?) ?? 0);
+      });
+
+      // Keep last 52 weeks
+      if (computed.length > 52) {
+        computed.removeRange(0, computed.length - 52);
+      }
+
+      // Cache locally
+      await prefs.setString(_historyKey, json.encode(computed));
+      debugPrint('Computed ${computed.length} weekly averages from raw sleep records.');
+      return computed;
+    } catch (e) {
+      debugPrint('Computing weekly history from raw records failed: $e');
+    }
+
+    return [];
   }
 
   /// Clear all stored records (for testing).
@@ -407,8 +512,77 @@ class SleepStorageService {
       }
 
       debugPrint('Sleep sync from Firestore complete: ${cloudRecords.length} records merged.');
+
+      // ── Also sync weekly history/averages from Firestore ──
+      await _syncWeeklyHistoryFromFirestore(prefs);
     } catch (e) {
       debugPrint('Firestore sleep sync failed (offline?): $e');
+    }
+  }
+
+  /// Pull weekly average history from Firestore and merge into local cache.
+  /// This ensures "Past Insights" shows data after reinstall / device switch.
+  static Future<void> _syncWeeklyHistoryFromFirestore(SharedPreferences prefs) async {
+    try {
+      final cloudAverages = await _firestore.getSleepWeeklyAverages();
+      if (cloudAverages.isEmpty) return;
+
+      // Load existing local history
+      final localHistoryStr = prefs.getString(_historyKey) ?? '[]';
+      final List<dynamic> localHistory = json.decode(localHistoryStr);
+
+      // Build a set of existing (week, year) keys for de-duplication
+      final existingKeys = <String>{};
+      for (final entry in localHistory) {
+        final w = entry['week'];
+        final y = entry['year'];
+        if (w != null && y != null) {
+          existingKeys.add('${y}_$w');
+        }
+      }
+
+      // Merge cloud entries that aren't already present locally
+      int added = 0;
+      for (final cloudEntry in cloudAverages) {
+        final w = cloudEntry['week'];
+        final y = cloudEntry['year'];
+        if (w == null || y == null) continue;
+
+        final key = '${y}_$w';
+        if (!existingKeys.contains(key)) {
+          localHistory.add({
+            'week': w,
+            'year': y,
+            'avgHours': (cloudEntry['avgHours'] as num?)?.toDouble() ?? 0.0,
+            'daysLogged': cloudEntry['daysLogged'] as int? ?? 0,
+            'archivedAt': cloudEntry['archivedAt'] ?? cloudEntry['updatedAt']?.toString() ?? DateTime.now().toIso8601String(),
+          });
+          existingKeys.add(key);
+          added++;
+        }
+      }
+
+      if (added > 0) {
+        // Sort by year then week ascending (oldest first, matching local convention)
+        localHistory.sort((a, b) {
+          final aYear = (a['year'] as int?) ?? 0;
+          final bYear = (b['year'] as int?) ?? 0;
+          if (aYear != bYear) return aYear.compareTo(bYear);
+          final aWeek = (a['week'] as int?) ?? 0;
+          final bWeek = (b['week'] as int?) ?? 0;
+          return aWeek.compareTo(bWeek);
+        });
+
+        // Keep last 52 weeks
+        if (localHistory.length > 52) {
+          localHistory.removeRange(0, localHistory.length - 52);
+        }
+
+        await prefs.setString(_historyKey, json.encode(localHistory));
+        debugPrint('Sleep weekly history synced from Firestore: $added new entries merged.');
+      }
+    } catch (e) {
+      debugPrint('Firestore weekly history sync failed: $e');
     }
   }
 }

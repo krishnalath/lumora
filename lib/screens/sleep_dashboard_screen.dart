@@ -623,11 +623,30 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
 
   // ── History Section ─────────────────────────────────────────────
   Widget _buildHistorySection() {
+    // Collect daily entries from the current week (for fallback display)
+    final List<MapEntry<int, SleepRecord>> dailyEntries = [];
+    if (_history.isEmpty) {
+      final todayWeekday = DateTime.now().weekday;
+      for (int i = 1; i <= 7; i++) {
+        final record = _weeklySummary[i];
+        // Skip today (already shown in the main score card) and nulls
+        if (record != null && i != todayWeekday) {
+          dailyEntries.add(MapEntry(i, record));
+        }
+      }
+      // Sort by weekday descending (most recent first)
+      dailyEntries.sort((a, b) => b.key.compareTo(a.key));
+    }
+
+    final bool showWeekly = _history.isNotEmpty;
+    final bool showDaily = !showWeekly && dailyEntries.isNotEmpty;
+    final bool showEmpty = !showWeekly && !showDaily;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Past Insights',
+          showWeekly ? 'Past Insights' : 'This Week\'s Log',
           style: GoogleFonts.outfit(
             fontSize: 20,
             fontWeight: FontWeight.w800,
@@ -635,7 +654,7 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
           ),
         ),
         const SizedBox(height: 16),
-        if (_history.isEmpty)
+        if (showEmpty)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
@@ -647,13 +666,13 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
             child: Column(
               children: [
                 Icon(
-                  Icons.history_rounded,
+                  Icons.nightlight_round,
                   color: Colors.white24,
                   size: 32,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'No past insights yet.',
+                  'No sleep entries yet.',
                   style: GoogleFonts.outfit(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -662,7 +681,7 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Keep logging your sleep each week to build your history.',
+                  'Log your sleep above to start tracking your patterns.',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.dmSans(
                     fontSize: 13,
@@ -672,6 +691,90 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
               ],
             ),
           )
+        else if (showDaily)
+          ...dailyEntries.map((entry) {
+            final weekday = entry.key;
+            final record = entry.value;
+            final hours = record.duration.inMinutes / 60.0;
+            final quality = record.qualityLabel;
+
+            Color accentColor;
+            if (hours >= 7 && hours <= 9) {
+              accentColor = AppTheme.accentGreen;
+            } else if (hours >= 5.5) {
+              accentColor = const Color(0xFFFFC94A);
+            } else {
+              accentColor = const Color(0xFFFF6B6B);
+            }
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E212B),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: accentColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        Icons.bedtime_rounded,
+                        color: accentColor,
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _weekdayName(weekday),
+                          style: GoogleFonts.outfit(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${record.durationFormatted} · $quality',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            color: Colors.white54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    hours.toStringAsFixed(1),
+                    style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: accentColor,
+                    ),
+                  ),
+                  Text(
+                    'h',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: accentColor.withOpacity(0.6),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          })
         else
           ..._history.map((entry) {
             final double avgHours = entry['avgHours'] as double? ?? 0.0;
@@ -750,6 +853,12 @@ class _SleepDashboardScreenState extends State<SleepDashboardScreen>
           }),
       ],
     );
+  }
+
+  String _weekdayName(int weekday) {
+    const names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    if (weekday >= 1 && weekday <= 7) return names[weekday - 1];
+    return 'Day $weekday';
   }
 }
 
