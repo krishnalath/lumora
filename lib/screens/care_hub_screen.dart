@@ -71,8 +71,10 @@ class _CareHubScreenState extends State<CareHubScreen> {
 
   Future<void> _bookSession() async {
     if (_selectedDate == null || _selectedTime == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a date and time first.')),
+      AppTheme.showCustomSnackBar(
+        context,
+        'Please select a date and time first.',
+        isError: true,
       );
       return;
     }
@@ -121,12 +123,10 @@ class _CareHubScreenState extends State<CareHubScreen> {
 
       if (hasActiveSession) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'You already have an active session request or appointment.',
-              ),
-            ),
+          AppTheme.showCustomSnackBar(
+            context,
+            'You already have an active session request or appointment.',
+            isError: true,
           );
           setState(() => _isBooking = false);
         }
@@ -154,9 +154,11 @@ class _CareHubScreenState extends State<CareHubScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        AppTheme.showCustomSnackBar(
           context,
-        ).showSnackBar(SnackBar(content: Text('Error booking session: $e')));
+          'Error booking session: $e',
+          isError: true,
+        );
       }
     } finally {
       if (mounted) setState(() => _isBooking = false);

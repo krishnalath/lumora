@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sleep_record.dart';
@@ -13,14 +14,29 @@ import 'firestore_service.dart';
 ///   - `'sleep_week_history'`  : JSON list of past weekly averages [{week, year, avgHours}]
 ///   - `'sleep_all_records'`   : Full archive of all records for long-term reference
 class SleepStorageService {
-  static const String _currentWeekKey = 'sleep_current_week';
-  static const String _weekNumberKey = 'sleep_week_number';
-  static const String _weekYearKey = 'sleep_week_year';
-  static const String _historyKey = 'sleep_week_history';
-  static const String _allRecordsKey = 'sleep_all_records';
-  static const String _lastLogDateKey = 'sleep_last_log_date';
+  // Base key names — always combined with the user's UID via _key()
+  static const String _currentWeekBase = 'sleep_current_week';
+  static const String _weekNumberBase = 'sleep_week_number';
+  static const String _weekYearBase = 'sleep_week_year';
+  static const String _historyBase = 'sleep_week_history';
+  static const String _allRecordsBase = 'sleep_all_records';
+  static const String _lastLogDateBase = 'sleep_last_log_date';
 
   static final FirestoreService _firestore = FirestoreService();
+
+  /// Returns the current Firebase user's UID, or null if not signed in.
+  static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  /// Returns a user-scoped SharedPreferences key.
+  /// Throws if no user is signed in.
+  static String _key(String base) {
+    final uid = _uid;
+    if (uid == null) {
+      throw StateError('No user signed in — cannot access sleep storage');
+    }
+    return '${uid}_$base';
+  }
+
 
   /// Tracks whether the initial Firestore sync has completed.
   /// Screens can call [ensureSynced] to wait for it before loading data.
@@ -73,8 +89,8 @@ class SleepStorageService {
     final now = DateTime.now();
     final currentWeek = _isoWeekNumber(now);
     final currentYear = _isoWeekYear(now);
-    final storedWeek = prefs.getInt(_weekNumberKey) ?? -1;
-    final storedYear = prefs.getInt(_weekYearKey) ?? -1;
+    final storedWeek = prefs.getInt(_key(_weekNumberBase)) ?? -1;
+    final storedYear = prefs.getInt(_key(_weekYearBase)) ?? -1;
 
     if (storedWeek != currentWeek || storedYear != currentYear) {
       // Archive the previous week's data before clearing
@@ -82,17 +98,17 @@ class SleepStorageService {
         await _archiveCurrentWeek(prefs, storedWeek, storedYear);
       }
       // Reset current week
-      await prefs.setString(_currentWeekKey, '{}');
-      await prefs.setInt(_weekNumberKey, currentWeek);
-      await prefs.setInt(_weekYearKey, currentYear);
+      await prefs.setString(_key(_currentWeekBase), '{}');
+      await prefs.setInt(_key(_weekNumberBase), currentWeek);
+      await prefs.setInt(_key(_weekYearBase), currentYear);
       // Reset last log date so user can log on the new week
-      await prefs.remove(_lastLogDateKey);
+      await prefs.remove(_key(_lastLogDateBase));
     }
   }
 
   /// Archive the current week's average sleep hours into history.
   static Future<void> _archiveCurrentWeek(SharedPreferences prefs, int week, int year) async {
-    final weekDataStr = prefs.getString(_currentWeekKey) ?? '{}';
+    final weekDataStr = prefs.getString(_key(_currentWeekBase)) ?? '{}';
     try {
       final Map<String, dynamic> weekData = json.decode(weekDataStr);
       if (weekData.isEmpty) return;
@@ -112,7 +128,7 @@ class SleepStorageService {
       final avgHours = totalMinutes / (count * 60.0);
 
       // Load existing history
-      final historyStr = prefs.getString(_historyKey) ?? '[]';
+      final historyStr = prefs.getString(_key(_historyBase)) ?? '[]';
       final List<dynamic> history = json.decode(historyStr);
       final avgEntry = {
         'week': week,
@@ -126,7 +142,7 @@ class SleepStorageService {
       if (history.length > 52) {
         history.removeRange(0, history.length - 52);
       }
-      await prefs.setString(_historyKey, json.encode(history));
+      await prefs.setString(_key(_historyBase), json.encode(history));
 
       // Sync weekly average to Firestore
       try {
@@ -146,14 +162,14 @@ class SleepStorageService {
     final prefs = await SharedPreferences.getInstance();
 
     // Save to current week map (keyed by weekday 1-7)
-    final weekDataStr = prefs.getString(_currentWeekKey) ?? '{}';
+    final weekDataStr = prefs.getString(_key(_currentWeekBase)) ?? '{}';
     final Map<String, dynamic> weekData = json.decode(weekDataStr);
     final wakeDay = record.sleepEnd?.weekday ?? record.sleepStart.weekday;
     weekData[wakeDay.toString()] = record.toJson();
-    await prefs.setString(_currentWeekKey, json.encode(weekData));
+    await prefs.setString(_key(_currentWeekBase), json.encode(weekData));
 
     // Also save to the full archive
-    final allStr = prefs.getString(_allRecordsKey) ?? '[]';
+    final allStr = prefs.getString(_key(_allRecordsBase)) ?? '[]';
     try {
       final List<dynamic> all = json.decode(allStr);
       // Remove existing record for same id
@@ -168,7 +184,7 @@ class SleepStorageService {
           return false;
         }
       });
-      await prefs.setString(_allRecordsKey, json.encode(all));
+      await prefs.setString(_key(_allRecordsBase), json.encode(all));
     } catch (_) {}
 
     // ── Sync to Firestore (fire-and-forget, won't block UI) ──
@@ -183,7 +199,7 @@ class SleepStorageService {
   static Future<Map<int, SleepRecord?>> getWeeklySummary() async {
     await _rotateWeekIfNeeded();
     final prefs = await SharedPreferences.getInstance();
-    final weekDataStr = prefs.getString(_currentWeekKey) ?? '{}';
+    final weekDataStr = prefs.getString(_key(_currentWeekBase)) ?? '{}';
 
     final Map<int, SleepRecord?> summary = {};
     for (int i = 1; i <= 7; i++) {
@@ -207,7 +223,7 @@ class SleepStorageService {
   static Future<SleepRecord?> getTodaySleep() async {
     await _rotateWeekIfNeeded();
     final prefs = await SharedPreferences.getInstance();
-    final weekDataStr = prefs.getString(_currentWeekKey) ?? '{}';
+    final weekDataStr = prefs.getString(_key(_currentWeekBase)) ?? '{}';
     final today = DateTime.now().weekday;
 
     try {
@@ -223,7 +239,7 @@ class SleepStorageService {
   static Future<double> getWeeklyAverageSleep() async {
     await _rotateWeekIfNeeded();
     final prefs = await SharedPreferences.getInstance();
-    final weekDataStr = prefs.getString(_currentWeekKey) ?? '{}';
+    final weekDataStr = prefs.getString(_key(_currentWeekBase)) ?? '{}';
 
     try {
       final Map<String, dynamic> weekData = json.decode(weekDataStr);
@@ -254,12 +270,12 @@ class SleepStorageService {
     final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
     // Fast path: explicit flag
-    final lastLog = prefs.getString(_lastLogDateKey);
+    final lastLog = prefs.getString(_key(_lastLogDateBase));
     if (lastLog == today) return true;
 
     // Fallback: check if there's actual data for today's weekday
     // (covers cases where flag was lost, e.g. after cloud sync / reinstall)
-    final weekDataStr = prefs.getString(_currentWeekKey) ?? '{}';
+    final weekDataStr = prefs.getString(_key(_currentWeekBase)) ?? '{}';
     try {
       final Map<String, dynamic> weekData = json.decode(weekDataStr);
       final todayKey = now.weekday.toString();
@@ -270,7 +286,7 @@ class SleepStorageService {
         final recordDay = '${recordDate.year}-${recordDate.month.toString().padLeft(2, '0')}-${recordDate.day.toString().padLeft(2, '0')}';
         if (recordDay == today || record.sleepStart.day == now.day) {
           // Restore the flag so future checks are fast
-          await prefs.setString(_lastLogDateKey, today);
+          await prefs.setString(_key(_lastLogDateBase), today);
           return true;
         }
       }
@@ -284,7 +300,7 @@ class SleepStorageService {
     final prefs = await SharedPreferences.getInstance();
     final now = DateTime.now();
     final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    await prefs.setString(_lastLogDateKey, today);
+    await prefs.setString(_key(_lastLogDateBase), today);
   }
 
   /// Log sleep from user-provided bedtime and wakeup time.
@@ -314,7 +330,7 @@ class SleepStorageService {
   /// `sleep_weekly_averages`, then computes from raw `sleep_records`.
   static Future<List<Map<String, dynamic>>> getWeeklyHistory() async {
     final prefs = await SharedPreferences.getInstance();
-    final historyStr = prefs.getString(_historyKey) ?? '[]';
+    final historyStr = prefs.getString(_key(_historyBase)) ?? '[]';
     try {
       final List<dynamic> history = json.decode(historyStr);
       if (history.isNotEmpty) {
@@ -341,7 +357,7 @@ class SleepStorageService {
           return ((a['week'] as int?) ?? 0).compareTo((b['week'] as int?) ?? 0);
         });
 
-        await prefs.setString(_historyKey, json.encode(normalised));
+        await prefs.setString(_key(_historyBase), json.encode(normalised));
         return normalised;
       }
     } catch (e) {
@@ -416,7 +432,7 @@ class SleepStorageService {
       }
 
       // Cache locally
-      await prefs.setString(_historyKey, json.encode(computed));
+      await prefs.setString(_key(_historyBase), json.encode(computed));
       debugPrint('Computed ${computed.length} weekly averages from raw sleep records.');
       return computed;
     } catch (e) {
@@ -426,15 +442,36 @@ class SleepStorageService {
     return [];
   }
 
-  /// Clear all stored records (for testing).
+  /// Clear all stored records for the current user (for testing).
   static Future<void> clearAll() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_currentWeekKey);
-    await prefs.remove(_weekNumberKey);
-    await prefs.remove(_weekYearKey);
-    await prefs.remove(_historyKey);
-    await prefs.remove(_allRecordsKey);
-    await prefs.remove(_lastLogDateKey);
+    await prefs.remove(_key(_currentWeekBase));
+    await prefs.remove(_key(_weekNumberBase));
+    await prefs.remove(_key(_weekYearBase));
+    await prefs.remove(_key(_historyBase));
+    await prefs.remove(_key(_allRecordsBase));
+    await prefs.remove(_key(_lastLogDateBase));
+  }
+
+  /// Clear local sleep cache for the current user.
+  /// Should be called on sign-out to prevent data leaking to the next user.
+  static Future<void> clearLocalData() async {
+    final uid = _uid;
+    if (uid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final keys = [
+      '${uid}_$_currentWeekBase',
+      '${uid}_$_weekNumberBase',
+      '${uid}_$_weekYearBase',
+      '${uid}_$_historyBase',
+      '${uid}_$_allRecordsBase',
+      '${uid}_$_lastLogDateBase',
+    ];
+    for (final k in keys) {
+      await prefs.remove(k);
+    }
+    // Reset the sync completer so the next login triggers a fresh sync
+    _syncCompleter = null;
   }
 
   // ── Firestore Sync ─────────────────────────────────────────────
@@ -487,14 +524,14 @@ class SleepStorageService {
       }
 
       // Merge with local: cloud wins for same weekday
-      final localStr = prefs.getString(_currentWeekKey) ?? '{}';
+      final localStr = prefs.getString(_key(_currentWeekBase)) ?? '{}';
       final Map<String, dynamic> localData = json.decode(localStr);
       localData.addAll(weekData); // Cloud overwrites local for same keys
-      await prefs.setString(_currentWeekKey, json.encode(localData));
+      await prefs.setString(_key(_currentWeekBase), json.encode(localData));
 
       // Update week tracking
-      await prefs.setInt(_weekNumberKey, _isoWeekNumber(now));
-      await prefs.setInt(_weekYearKey, _isoWeekYear(now));
+      await prefs.setInt(_key(_weekNumberBase), _isoWeekNumber(now));
+      await prefs.setInt(_key(_weekYearBase), _isoWeekYear(now));
 
       // Restore the "logged today" flag if today's data came from the cloud
       final todayKey = now.weekday.toString();
@@ -506,7 +543,7 @@ class SleepStorageService {
               recordDate.month == now.month &&
               recordDate.day == now.day) {
             final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-            await prefs.setString(_lastLogDateKey, todayStr);
+            await prefs.setString(_key(_lastLogDateBase), todayStr);
           }
         } catch (_) {}
       }
@@ -528,7 +565,7 @@ class SleepStorageService {
       if (cloudAverages.isEmpty) return;
 
       // Load existing local history
-      final localHistoryStr = prefs.getString(_historyKey) ?? '[]';
+      final localHistoryStr = prefs.getString(_key(_historyBase)) ?? '[]';
       final List<dynamic> localHistory = json.decode(localHistoryStr);
 
       // Build a set of existing (week, year) keys for de-duplication
@@ -578,7 +615,7 @@ class SleepStorageService {
           localHistory.removeRange(0, localHistory.length - 52);
         }
 
-        await prefs.setString(_historyKey, json.encode(localHistory));
+        await prefs.setString(_key(_historyBase), json.encode(localHistory));
         debugPrint('Sleep weekly history synced from Firestore: $added new entries merged.');
       }
     } catch (e) {

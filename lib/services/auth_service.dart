@@ -1,5 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'conversation_service.dart';
+import 'sleep_storage_service.dart';
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
@@ -45,6 +47,11 @@ class AuthService {
 
   // Sign out
   Future<void> signOut() async {
+    // Clear user-scoped local data BEFORE signing out
+    // (must happen while user is still authenticated so we know their UID)
+    await SleepStorageService.clearLocalData();
+    await ConversationService.clearLocalData();
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_role');
     await prefs.remove('therapist_name');

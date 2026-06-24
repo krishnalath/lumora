@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Conversation {
@@ -38,8 +39,22 @@ class Conversation {
 }
 
 class ConversationService {
-  static const String _conversationsKey = 'ai_conversations';
-  static const String _currentConversationKey = 'current_conversation_id';
+  // Base key names — always combined with the user's UID via _key()
+  static const String _conversationsBase = 'ai_conversations';
+  static const String _currentConversationBase = 'current_conversation_id';
+
+  /// Returns the current Firebase user's UID, or null if not signed in.
+  static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  /// Returns a user-scoped SharedPreferences key.
+  /// Throws if no user is signed in.
+  static String _key(String base) {
+    final uid = _uid;
+    if (uid == null) {
+      throw StateError('No user signed in — cannot access conversation storage');
+    }
+    return '${uid}_$base';
+  }
 
   // Save a conversation
   static Future<void> saveConversation(Conversation conversation) async {
@@ -54,13 +69,13 @@ class ConversationService {
     conversations.sort((a, b) => b.lastModified.compareTo(a.lastModified));
 
     final jsonList = conversations.map((c) => jsonEncode(c.toJson())).toList();
-    await prefs.setStringList(_conversationsKey, jsonList);
+    await prefs.setStringList(_key(_conversationsBase), jsonList);
   }
 
   // Get all conversations
   static Future<List<Conversation>> getAllConversations() async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonList = prefs.getStringList(_conversationsKey) ?? [];
+    final jsonList = prefs.getStringList(_key(_conversationsBase)) ?? [];
 
     return jsonList
         .map((json) => Conversation.fromJson(jsonDecode(json)))
@@ -84,7 +99,7 @@ class ConversationService {
     conversations.removeWhere((c) => c.id == id);
 
     final jsonList = conversations.map((c) => jsonEncode(c.toJson())).toList();
-    await prefs.setStringList(_conversationsKey, jsonList);
+    await prefs.setStringList(_key(_conversationsBase), jsonList);
   }
 
   // Create new conversation
@@ -109,25 +124,35 @@ class ConversationService {
   // Set current conversation
   static Future<void> setCurrentConversation(String id) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_currentConversationKey, id);
+    await prefs.setString(_key(_currentConversationBase), id);
   }
 
   // Get current conversation
   static Future<String?> getCurrentConversation() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_currentConversationKey);
+    return prefs.getString(_key(_currentConversationBase));
   }
 
-  // Clear all conversations
+  // Clear all conversations for the current user
   static Future<void> clearAllConversations() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_conversationsKey);
-    await prefs.remove(_currentConversationKey);
+    await prefs.remove(_key(_conversationsBase));
+    await prefs.remove(_key(_currentConversationBase));
   }
 
   // Clear only the current session pointer (keeps history intact)
   static Future<void> clearCurrentConversation() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_currentConversationKey);
+    await prefs.remove(_key(_currentConversationBase));
+  }
+
+  /// Clear local conversation cache for the current user.
+  /// Should be called on sign-out to prevent data leaking to the next user.
+  static Future<void> clearLocalData() async {
+    final uid = _uid;
+    if (uid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('${uid}_$_conversationsBase');
+    await prefs.remove('${uid}_$_currentConversationBase');
   }
 }
