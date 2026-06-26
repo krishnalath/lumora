@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31+) splash screen override for Dark Mode -->
+    <!-- Matches the intro screen background so there's no jarring transition -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <!-- Override Android 12 system splash: use solid background, no icon -->
+        <item name="android:windowSplashScreenBackground">#F6F5F2</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/empty</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#F6F5F2</item>
+        <item name="android:windowSplashScreenBrandingImage">@null</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>
